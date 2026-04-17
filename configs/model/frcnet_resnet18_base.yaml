@@ -1,0 +1,7 @@
+model:
+  name: frcnet_resnet18_base
+  backbone: resnet18
+  num_classes: 10
+  resolution_temperature: 1.0
+  content_temperature: 1.0
+

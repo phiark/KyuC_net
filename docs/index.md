@@ -31,6 +31,7 @@
 ### 3.3 Architecture
 
 - [架构说明](architecture/architecture_description.md)
+- [运行环境矩阵](architecture/runtime_environment_matrix.md)
 - [项目结构说明](architecture/project_structure.md)
 
 ### 3.4 Verification
@@ -60,4 +61,3 @@
 - 代码主命名不直接沿用论文的单字母符号, 而是使用稳定、可追踪的工程名词
 - 文件树按文档生命周期、配置、实现、验证、记录分层
 - 所有实验结论必须能追溯到需求、ADR、配置和运行记录
-

@@ -22,6 +22,19 @@ Where:
 
 This repository is initialized so that documents are the source of truth and code follows the approved contracts.
 
+## Runtime Support
+
+FRCNet 0.1 targets a single training code path that runs on:
+
+- Apple Silicon macOS with `MPS`
+- Linux with `ROCm`
+- Linux with `CUDA`
+- `CPU` fallback
+
+The runtime resolver prefers `mps -> rocm -> cuda -> cpu` when `backend=auto`.
+
+Installation notes by platform are documented in [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md).
+
 ## Development Order
 
 1. Update or add requirements in `docs/requirements/`.
@@ -37,6 +50,7 @@ This repository is initialized so that documents are the source of truth and cod
 - [Naming And Identifier Standard](docs/governance/naming_and_identifier_standard.md)
 - [System Requirements Specification](docs/requirements/system_requirements_specification.md)
 - [Architecture Description](docs/architecture/architecture_description.md)
+- [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md)
 - [Project Structure](docs/architecture/project_structure.md)
 - [Verification And Validation Plan](docs/verification/verification_and_validation_plan.md)
 - [ADR-0001 Document-Driven Baseline](records/decisions/adr_0001_document_driven_baseline.md)
@@ -57,5 +71,26 @@ This repository is initialized so that documents are the source of truth and cod
 
 ## Current Status
 
-This baseline defines the naming policy, document taxonomy, architectural boundaries, and verification plan. Model implementation has not started yet.
+The repository now contains:
 
+- document-driven governance and architecture baselines
+- a minimal FRCNet 0.1 model core
+- cross-platform runtime resolution for MPS / ROCm / CUDA / CPU
+- contract tests and smoke training tests
+
+## Quick Start
+
+Create a virtual environment and install the package:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .
+```
+
+Run the test suite:
+
+```bash
+pytest
+```

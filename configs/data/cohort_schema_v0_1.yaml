@@ -1,0 +1,17 @@
+data:
+  cohort_names:
+    - easy_id
+    - ambiguous_id
+    - hard_id
+    - ood
+    - unknown_supervision
+  train_loss_cohorts:
+    id:
+      - easy_id
+      - hard_id
+    ambiguous:
+      - ambiguous_id
+    unknown:
+      - unknown_supervision
+  ignored_training_cohorts:
+    - ood

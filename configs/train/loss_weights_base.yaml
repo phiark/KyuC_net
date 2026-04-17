@@ -1,0 +1,17 @@
+runtime:
+  backend: auto
+  dtype: float32
+  amp_enabled: false
+  pin_memory: auto
+
+dataloader:
+  num_workers: 0
+  persistent_workers: false
+
+loss:
+  weight_id: 1.0
+  weight_unknown: 1.0
+  weight_ambiguous: 1.0
+  ambiguous_resolution_target: 0.8
+  ambiguous_resolution_weight: 1.0
+
