@@ -1,7 +1,12 @@
 """Data contracts and manifest helpers for FRCNet."""
 
 from frcnet.data.contracts import ALLOWED_COHORT_NAMES, BatchInput, validate_batch_input
-from frcnet.data.manifest import SampleManifestRecord, read_manifest_jsonl, write_manifest_jsonl
+from frcnet.data.manifest import (
+    SampleManifestRecord,
+    read_manifest_jsonl,
+    validate_manifest_records,
+    write_manifest_jsonl,
+)
 from frcnet.data.plan_a import (
     CIFAR10_CLASS_NAMES,
     ManifestBackedVisionDataset,
@@ -24,6 +29,7 @@ __all__ = [
     "read_manifest_jsonl",
     "summarize_manifest",
     "validate_batch_input",
+    "validate_manifest_records",
     "write_manifest_jsonl",
     "write_manifest_summary",
 ]

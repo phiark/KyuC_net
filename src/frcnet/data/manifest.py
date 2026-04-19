@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
@@ -76,3 +77,21 @@ def read_manifest_jsonl(input_path: str | Path) -> list[SampleManifestRecord]:
             records.append(SampleManifestRecord.from_dict(json.loads(line)))
     return records
 
+
+def validate_manifest_records(records: Iterable[SampleManifestRecord]) -> list[SampleManifestRecord]:
+    materialized_records = list(records)
+    if not materialized_records:
+        raise ValueError("Manifest must contain at least one record.")
+
+    protocol_ids = sorted({record.protocol_id for record in materialized_records})
+    if len(protocol_ids) != 1:
+        raise ValueError(f"Manifest must use exactly one protocol_id. Found: {protocol_ids}")
+
+    duplicate_sample_ids = sorted(
+        sample_id for sample_id, count in Counter(record.sample_id for record in materialized_records).items() if count > 1
+    )
+    if duplicate_sample_ids:
+        preview = ", ".join(duplicate_sample_ids[:5])
+        raise ValueError(f"Manifest must use unique sample_id values. Duplicates: {preview}")
+
+    return materialized_records

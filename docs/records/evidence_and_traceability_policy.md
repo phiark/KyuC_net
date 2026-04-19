@@ -3,7 +3,7 @@
 - document_id: rec_evidence_traceability_policy
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-19
 
 ## 1. 目标
 
@@ -57,3 +57,11 @@
 - 生成脚本或生成命令
 - 对应 run_id
 
+实验记录中的 analysis/report 追踪字段还必须注明:
+
+- `checkpoint_path`
+- `analysis_summary_path`
+- `sidecar_resolution_mode`
+- `integrity_overrides`
+- `source_run_ids`
+- `source_protocol_ids`

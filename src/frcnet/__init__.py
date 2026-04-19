@@ -9,6 +9,7 @@ from frcnet.data import (
     collate_manifest_samples,
     load_plan_a_source_datasets,
     read_manifest_jsonl,
+    validate_manifest_records,
     validate_batch_input,
     write_manifest_jsonl,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "run_train_step",
     "summarize_matched_ambiguous_vs_ood",
     "validate_batch_input",
+    "validate_manifest_records",
     "write_manifest_jsonl",
     "write_matched_benchmark_summary",
     "write_sample_analysis_records",

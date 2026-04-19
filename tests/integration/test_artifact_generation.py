@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from frcnet.analysis import (
@@ -21,7 +22,7 @@ def _build_records():
     model = FRCNetModel(num_classes=10)
     model_output = model(batch_input.image)
     records = build_sample_analysis_records(model_output, batch_input, run_id="RUN-1", protocol_id="plan_a_v1")
-    duplicated = records + records
+    duplicated = [replace(record) for record in records] + [replace(record) for record in records]
     for index, record in enumerate(duplicated):
         record.sample_id = f"{record.sample_id}-{index}"
     return duplicated
@@ -63,8 +64,19 @@ def test_matched_summary_and_experiment_record(tmp_path: Path):
         proposition_record_path=str(tmp_path / "top1_proposition_records.csv"),
         artifact_paths={**artifact_paths, "artifact_paths": str(artifact_index_path)},
         matched_summary=matched_summary,
+        checkpoint_path=str(tmp_path / "checkpoint_best.pt"),
+        analysis_summary_path=str(tmp_path / "analysis_summary.json"),
+        sidecar_resolution_mode="analysis_summary_explicit",
+        integrity_overrides=("missing_checkpoint",),
+        source_run_ids=("RUN-1",),
+        source_protocol_ids=("plan_a_v1",),
+        resolved_eval_config={"primary_scalar": "completion_score_beta_0_1", "random_state": 7},
     )
+    record_text = experiment_record_path.read_text(encoding="utf-8")
 
     assert matched_path.exists()
     assert artifact_index_path.exists()
     assert experiment_record_path.exists()
+    assert "checkpoint_path" in record_text
+    assert "analysis_summary_path" in record_text
+    assert "Resolved Eval Config" in record_text

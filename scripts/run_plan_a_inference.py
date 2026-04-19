@@ -20,6 +20,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-path", required=True)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--checkpoint-path", default=None)
+    parser.add_argument(
+        "--allow-missing-checkpoint",
+        action="store_true",
+        help="Allow analysis export without a checkpoint and record the override in analysis_summary.json.",
+    )
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--run-id", default=None)
     return parser.parse_args()
@@ -36,9 +41,11 @@ def main() -> int:
         run_id=run_id,
         checkpoint_path=args.checkpoint_path,
         batch_size=args.batch_size,
+        allow_missing_checkpoint=args.allow_missing_checkpoint,
     )
     print(outputs["analysis_path"])
     print(outputs["proposition_path"])
+    print(outputs["analysis_summary_path"])
     return 0
 
 

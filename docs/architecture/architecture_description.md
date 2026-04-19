@@ -3,7 +3,7 @@
 - document_id: arch_architecture_description
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-19
 - standard_alignment: iso_ieee_42010_informed, iso_iec_ieee_15289
 
 ## 1. 架构目标
@@ -170,6 +170,22 @@ input sample
 - `completion_score_beta_0_1`
 - `completion_score_beta_0_5`
 
+### 4.4 Analysis Export Summary Contract
+
+analysis 阶段必须额外生成 `analysis_summary.json`, 作为 report 阶段的规范 sidecar。
+
+该 sidecar 至少应包含:
+
+- `run_id`
+- `protocol_id`
+- `analysis_path`
+- `checkpoint_path`
+- `manifest_snapshot_path`
+- `model_config_snapshot_path`
+- `proposition_path`
+- `integrity_overrides`
+- `sidecar_resolution_mode`
+
 ## 5. 关键架构约束
 
 - `ARCH-001`: `unknown_mass` 只能由 `resolution_ratio` 导出
@@ -177,6 +193,8 @@ input sample
 - `ARCH-003`: `completion_score` 属于读出层, 不属于模型主状态
 - `ARCH-004`: 分析层必须支持 pair 与 scalar 并行输出
 - `ARCH-005`: 文档、配置、代码、实验记录之间必须有可追溯链接
+- `ARCH-006`: report 阶段必须先完成 bundle integrity 校验, 再写 `experiment_record.md`
+- `ARCH-007`: analysis/report 间的 sidecar 解析必须优先使用规范 `analysis_summary.json`, 不得默认依赖 sibling 猜测
 
 ## 6. 初始化阶段的默认技术选择
 

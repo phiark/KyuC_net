@@ -7,6 +7,12 @@
 - linked_requirements: []
 - linked_adrs: []
 - run_id: RUN-YYYYMMDDThhmmss+zzzz-xxx
+- checkpoint_path: ""
+- analysis_summary_path: ""
+- sidecar_resolution_mode: ""
+- integrity_overrides: []
+- source_run_ids: []
+- source_protocol_ids: []
 
 ## Objective
 
@@ -44,4 +50,3 @@
 ## Decision
 
 说明实验后采取的动作。
-

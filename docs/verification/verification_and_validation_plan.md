@@ -3,7 +3,7 @@
 - document_id: ver_verification_and_validation_plan
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-19
 
 ## 1. 目标
 
@@ -29,6 +29,8 @@
 - `VER-CON-002`: model output contract 字段完整
 - `VER-CON-003`: analysis record contract 列名稳定
 - `VER-CON-004`: cohort 名称仅来自规范集合
+- `VER-CON-005`: manifest contract 保证非空、单一 `protocol_id` 与唯一 `sample_id`
+- `VER-CON-006`: analysis/report bundle contract 保证 run/protocol 与 sample set 一致
 
 ### 2.3 Integration Verification
 
@@ -38,6 +40,9 @@
 - `VER-INT-002`: 训练 step 能同时处理 known, unknown, ambiguous 样本
 - `VER-INT-003`: 评估流程能导出 scalar 和 pair 指标
 - `VER-INT-004`: 分析流程能生成 scatter、hexbin、occupancy 图
+- `VER-INT-005`: 无 checkpoint 的 analysis 导出默认被拒绝, 显式 override 时会留下 provenance 记录
+- `VER-INT-006`: report 流程优先使用 `analysis_summary.json`, 并在 legacy sibling 模式下执行完整性校验
+- `VER-INT-007`: matched benchmark 实际使用的 eval 参数与快照配置一致
 
 ### 2.4 Scientific Validation
 
@@ -58,6 +63,11 @@
 | `REQ-FN-012` | `VER-CON-003` |
 | `REQ-FN-013` | `VER-INT-004` |
 | `REQ-FN-014` | `VER-INT-003`, `VER-SCI-002` |
+| `REQ-FN-019` | `VER-INT-005`, `VER-CON-006` |
+| `REQ-FN-020` | `VER-CON-006`, `VER-INT-006` |
+| `REQ-FN-021` | `VER-CON-005`, `VER-CON-006` |
+| `REQ-FN-022` | `VER-INT-007` |
+| `REQ-FN-023` | `VER-INT-005`, `VER-INT-006` |
 | `REQ-SCI-001` | `VER-SCI-001` |
 | `REQ-SCI-002` | `VER-SCI-002` |
 | `REQ-SCI-003` | `VER-SCI-004` |
@@ -81,4 +91,3 @@
 3. content entropy 数值测试
 4. batch/output contract 测试
 5. 小样本 end-to-end smoke test
-

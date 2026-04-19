@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import csv
@@ -29,14 +30,19 @@ from frcnet.data import (
     load_plan_a_source_datasets,
     read_manifest_jsonl,
     summarize_manifest,
+    validate_manifest_records,
     write_manifest_jsonl,
     write_manifest_summary,
 )
 from frcnet.evaluation import (
+    AnalysisExportSummary,
     build_top1_proposition_records,
+    read_analysis_export_summary,
     read_sample_analysis_records,
+    read_top1_proposition_records,
     run_inference_export,
     summarize_matched_ambiguous_vs_ood,
+    write_analysis_export_summary,
     write_matched_benchmark_summary,
     write_sample_analysis_records,
     write_top1_proposition_records,
@@ -61,6 +67,35 @@ class TrainEpochSummary:
 
     def to_csv_row(self) -> dict[str, int | float]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class AnalysisRecordState:
+    run_ids: tuple[str, ...]
+    protocol_ids: tuple[str, ...]
+    sample_ids: frozenset[str]
+    duplicate_sample_ids: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class PropositionRecordState:
+    run_ids: tuple[str, ...]
+    protocol_ids: tuple[str, ...]
+    sample_ids: frozenset[str]
+    duplicate_sample_ids: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class ResolvedAnalysisSidecars:
+    analysis_summary_path: str | None
+    manifest_snapshot_path: str | None
+    proposition_path: str | None
+    model_config_snapshot_path: str | None
+    checkpoint_path: str | None
+    summary_run_id: str | None
+    summary_protocol_id: str | None
+    sidecar_resolution_mode: str
+    inherited_integrity_overrides: tuple[str, ...]
 
 
 def timestamp_run_id(prefix: str = "RUN") -> str:
@@ -89,6 +124,152 @@ def _copy_snapshot(input_path: str | Path, output_path: str | Path) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(input_path, output)
     return output
+
+
+def _copy_optional_snapshot(input_path: str | Path | None, output_path: str | Path) -> Path | None:
+    if input_path is None:
+        return None
+    source_path = Path(input_path)
+    if not source_path.exists():
+        return None
+    if source_path.resolve() == Path(output_path).resolve():
+        return source_path
+    return _copy_snapshot(source_path, output_path)
+
+
+def _duplicate_values(values: Iterable[str]) -> tuple[str, ...]:
+    return tuple(sorted(value for value, count in Counter(values).items() if count > 1))
+
+
+def _merge_integrity_overrides(*override_groups: Iterable[str]) -> list[str]:
+    merged: list[str] = []
+    for override_group in override_groups:
+        for override_value in override_group:
+            if override_value not in merged:
+                merged.append(override_value)
+    return merged
+
+
+def _inspect_sample_analysis_records(records: list) -> AnalysisRecordState:
+    return AnalysisRecordState(
+        run_ids=tuple(sorted({record.run_id for record in records})),
+        protocol_ids=tuple(sorted({record.protocol_id for record in records})),
+        sample_ids=frozenset(record.sample_id for record in records),
+        duplicate_sample_ids=_duplicate_values(record.sample_id for record in records),
+    )
+
+
+def _inspect_proposition_records(records: list) -> PropositionRecordState:
+    return PropositionRecordState(
+        run_ids=tuple(sorted({record.run_id for record in records})),
+        protocol_ids=tuple(sorted({record.protocol_id for record in records})),
+        sample_ids=frozenset(record.sample_id for record in records),
+        duplicate_sample_ids=_duplicate_values(record.sample_id for record in records),
+    )
+
+
+def _resolve_reference_path(reference: str | None, base_dir: Path) -> Path | None:
+    if reference in {None, ""}:
+        return None
+    candidate = Path(reference)
+    if candidate.is_absolute():
+        return candidate
+    return base_dir / candidate
+
+
+def _resolve_analysis_sidecars(
+    analysis_record_path: Path,
+    analysis_summary_path: str | Path | None,
+) -> tuple[ResolvedAnalysisSidecars, list[str]]:
+    integrity_errors: list[str] = []
+
+    if analysis_summary_path is not None:
+        summary_path = Path(analysis_summary_path)
+        resolution_mode = "analysis_summary_explicit"
+    else:
+        auto_summary_path = analysis_record_path.parent / "analysis_summary.json"
+        if auto_summary_path.exists():
+            summary_path = auto_summary_path
+            resolution_mode = "analysis_summary_auto"
+        else:
+            return (
+                ResolvedAnalysisSidecars(
+                    analysis_summary_path=None,
+                    manifest_snapshot_path=str(analysis_record_path.parent / "plan_a_manifest_snapshot.jsonl"),
+                    proposition_path=str(analysis_record_path.parent / "top1_proposition_records.csv"),
+                    model_config_snapshot_path=str(analysis_record_path.parent / "model_config_snapshot.yaml"),
+                    checkpoint_path=None,
+                    summary_run_id=None,
+                    summary_protocol_id=None,
+                    sidecar_resolution_mode="legacy_sibling",
+                    inherited_integrity_overrides=(),
+                ),
+                integrity_errors,
+            )
+
+    if not summary_path.exists():
+        integrity_errors.append("analysis_summary_missing")
+        return (
+            ResolvedAnalysisSidecars(
+                analysis_summary_path=str(summary_path),
+                manifest_snapshot_path=None,
+                proposition_path=None,
+                model_config_snapshot_path=None,
+                checkpoint_path=None,
+                summary_run_id=None,
+                summary_protocol_id=None,
+                sidecar_resolution_mode=resolution_mode,
+                inherited_integrity_overrides=(),
+            ),
+            integrity_errors,
+        )
+
+    summary = read_analysis_export_summary(summary_path)
+    resolved_analysis_path = _resolve_reference_path(summary.analysis_path, summary_path.parent)
+    if resolved_analysis_path is None or resolved_analysis_path.resolve() != analysis_record_path.resolve():
+        integrity_errors.append("analysis_summary_analysis_path_mismatch")
+
+    return (
+        ResolvedAnalysisSidecars(
+            analysis_summary_path=str(summary_path),
+            manifest_snapshot_path=(
+                None
+                if _resolve_reference_path(summary.manifest_snapshot_path, summary_path.parent) is None
+                else str(_resolve_reference_path(summary.manifest_snapshot_path, summary_path.parent))
+            ),
+            proposition_path=(
+                None
+                if _resolve_reference_path(summary.proposition_path, summary_path.parent) is None
+                else str(_resolve_reference_path(summary.proposition_path, summary_path.parent))
+            ),
+            model_config_snapshot_path=(
+                None
+                if _resolve_reference_path(summary.model_config_snapshot_path, summary_path.parent) is None
+                else str(_resolve_reference_path(summary.model_config_snapshot_path, summary_path.parent))
+            ),
+            checkpoint_path=(
+                None
+                if summary.checkpoint_path is None
+                else str(_resolve_reference_path(summary.checkpoint_path, summary_path.parent))
+            ),
+            summary_run_id=summary.run_id,
+            summary_protocol_id=summary.protocol_id,
+            sidecar_resolution_mode=resolution_mode,
+            inherited_integrity_overrides=summary.integrity_overrides,
+        ),
+        integrity_errors,
+    )
+
+
+def _finalize_integrity_errors(
+    integrity_errors: list[str],
+    *,
+    allow_integrity_override: bool,
+    inherited_overrides: Iterable[str] = (),
+) -> list[str]:
+    if integrity_errors and not allow_integrity_override:
+        raise ValueError(f"Integrity validation failed: {', '.join(integrity_errors)}")
+    return _merge_integrity_overrides(inherited_overrides, integrity_errors)
 
 
 def _build_model(model_config: Mapping[str, Any]) -> FRCNetModel:
@@ -302,7 +483,7 @@ def build_plan_a_manifest_bundle(
     output_root.mkdir(parents=True, exist_ok=True)
 
     source_datasets = load_plan_a_source_datasets(protocol_config)
-    manifest_records = build_plan_a_manifest(protocol_config, source_datasets)
+    manifest_records = validate_manifest_records(build_plan_a_manifest(protocol_config, source_datasets))
     manifest_path = write_manifest_jsonl(manifest_records, output_root / manifest_filename)
     summary_path = write_manifest_summary(manifest_records, output_root / summary_filename)
 
@@ -342,10 +523,10 @@ def train_plan_a_model(
 
     source_datasets = load_plan_a_source_datasets(protocol_config)
     if manifest_path is None:
-        manifest_records = build_plan_a_manifest(protocol_config, source_datasets)
+        manifest_records = validate_manifest_records(build_plan_a_manifest(protocol_config, source_datasets))
         manifest_snapshot_path = write_manifest_jsonl(manifest_records, manifests_dir / "train_manifest_snapshot.jsonl")
     else:
-        manifest_records = read_manifest_jsonl(manifest_path)
+        manifest_records = validate_manifest_records(read_manifest_jsonl(manifest_path))
         manifest_snapshot_path = _copy_snapshot(manifest_path, manifests_dir / "train_manifest_snapshot.jsonl")
     manifest_summary_path = write_manifest_summary(manifest_records, manifests_dir / "train_manifest_summary.json")
 
@@ -517,20 +698,27 @@ def export_plan_a_inference_bundle(
     run_id: str | None = None,
     checkpoint_path: str | Path | None = None,
     batch_size: int | None = None,
+    allow_missing_checkpoint: bool = False,
 ) -> dict[str, str]:
     protocol_config = _load_yaml_section(protocol_config_path, "protocol")
     model_config = _load_yaml_section(model_config_path, "model")
     resolved_run_id = run_id or timestamp_run_id()
 
+    integrity_overrides: list[str] = []
+    if checkpoint_path is None and not allow_missing_checkpoint:
+        raise ValueError("analysis export requires checkpoint_path unless allow_missing_checkpoint=True.")
+    if checkpoint_path is None and allow_missing_checkpoint:
+        integrity_overrides.append("missing_checkpoint")
+
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
     protocol_snapshot_path = _copy_snapshot(protocol_config_path, output_root / "protocol_config_snapshot.yaml")
     model_snapshot_path = _copy_snapshot(model_config_path, output_root / "model_config_snapshot.yaml")
-    manifest_snapshot_path = _copy_snapshot(manifest_path, output_root / "plan_a_manifest_snapshot.jsonl")
 
     runtime_spec = resolve_runtime(requested_backend="auto")
     source_datasets = load_plan_a_source_datasets(protocol_config)
-    manifest_records = read_manifest_jsonl(manifest_path)
+    manifest_records = validate_manifest_records(read_manifest_jsonl(manifest_path))
+    manifest_snapshot_path = _copy_snapshot(manifest_path, output_root / "plan_a_manifest_snapshot.jsonl")
     dataset = ManifestBackedVisionDataset(
         manifest_records=manifest_records,
         source_datasets=source_datasets,
@@ -565,6 +753,20 @@ def export_plan_a_inference_bundle(
         proposition_records,
         output_root / "top1_proposition_records.csv",
     )
+    analysis_summary_path = write_analysis_export_summary(
+        AnalysisExportSummary(
+            run_id=resolved_run_id,
+            protocol_id=protocol_config["protocol_id"],
+            analysis_path=str(analysis_path),
+            checkpoint_path=None if checkpoint_path is None else str(checkpoint_path),
+            manifest_snapshot_path=str(manifest_snapshot_path),
+            model_config_snapshot_path=str(model_snapshot_path),
+            proposition_path=str(proposition_path),
+            integrity_overrides=tuple(integrity_overrides),
+            sidecar_resolution_mode="analysis_summary",
+        ),
+        output_root / "analysis_summary.json",
+    )
 
     return {
         "run_id": resolved_run_id,
@@ -575,6 +777,7 @@ def export_plan_a_inference_bundle(
         "manifest_snapshot_path": str(manifest_snapshot_path),
         "analysis_path": str(analysis_path),
         "proposition_path": str(proposition_path),
+        "analysis_summary_path": str(analysis_summary_path),
     }
 
 
@@ -585,29 +788,111 @@ def generate_plan_a_artifact_bundle(
     eval_config_path: str | Path,
     output_dir: str | Path,
     analysis_config_path: str | Path | None = None,
+    analysis_summary_path: str | Path | None = None,
+    allow_integrity_override: bool = False,
 ) -> dict[str, str]:
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
     protocol_snapshot_path = _copy_snapshot(protocol_config_path, output_root / "protocol_config_snapshot.yaml")
     eval_snapshot_path = _copy_snapshot(eval_config_path, output_root / "eval_config_snapshot.yaml")
+    eval_config = _load_yaml_section(eval_config_path, "eval")
+    resolved_eval_config = {
+        "positive_cohort": str(eval_config.get("positive_cohort", "ambiguous_id")),
+        "negative_cohort": str(eval_config.get("negative_cohort", "ood")),
+        "primary_pair": str(eval_config.get("primary_pair", "resolution_ratio__content_entropy")),
+        "primary_scalar": str(eval_config.get("primary_scalar", "completion_score_beta_0_1")),
+        "test_size": float(eval_config.get("test_size", 0.3)),
+        "random_state": int(eval_config.get("random_state", 7)),
+    }
     analysis_config = {"figure_dpi": 200}
+    analysis_snapshot_path: Path | None = None
     if analysis_config_path is not None:
         analysis_payload = _load_yaml_section(analysis_config_path, "analysis")
         analysis_config.update(analysis_payload)
-        _copy_snapshot(analysis_config_path, output_root / "analysis_config_snapshot.yaml")
+        analysis_snapshot_path = _copy_snapshot(analysis_config_path, output_root / "analysis_config_snapshot.yaml")
 
     analysis_record_path = Path(analysis_path)
-    for sibling_name in ("model_config_snapshot.yaml", "plan_a_manifest_snapshot.jsonl", "top1_proposition_records.csv"):
-        sibling_path = analysis_record_path.parent / sibling_name
-        if sibling_path.exists() and sibling_path.parent != output_root:
-            shutil.copy2(sibling_path, output_root / sibling_name)
-
     sample_analysis_records = read_sample_analysis_records(analysis_record_path)
     if not sample_analysis_records:
         raise ValueError("analysis-path does not contain any sample analysis records.")
-    run_id = sample_analysis_records[0].run_id
-    protocol_id = sample_analysis_records[0].protocol_id
+
+    analysis_state = _inspect_sample_analysis_records(sample_analysis_records)
+    integrity_errors: list[str] = []
+    if analysis_state.duplicate_sample_ids:
+        integrity_errors.append("analysis_duplicate_sample_ids")
+    if len(analysis_state.run_ids) != 1:
+        integrity_errors.append("analysis_mixed_run_ids")
+    if len(analysis_state.protocol_ids) != 1:
+        integrity_errors.append("analysis_mixed_protocol_ids")
+
+    sidecars, sidecar_errors = _resolve_analysis_sidecars(analysis_record_path, analysis_summary_path)
+    integrity_errors.extend(sidecar_errors)
+    if sidecars.summary_run_id is not None and sidecars.summary_run_id not in analysis_state.run_ids:
+        integrity_errors.append("analysis_summary_run_id_mismatch")
+    if sidecars.summary_protocol_id is not None and sidecars.summary_protocol_id not in analysis_state.protocol_ids:
+        integrity_errors.append("analysis_summary_protocol_id_mismatch")
+
+    sidecar_prefix = "legacy" if sidecars.sidecar_resolution_mode == "legacy_sibling" else "analysis_summary"
+    manifest_records = None
+    if sidecars.manifest_snapshot_path is None or not Path(sidecars.manifest_snapshot_path).exists():
+        integrity_errors.append(f"{sidecar_prefix}_manifest_snapshot_missing")
+    else:
+        try:
+            manifest_records = validate_manifest_records(read_manifest_jsonl(sidecars.manifest_snapshot_path))
+        except ValueError:
+            integrity_errors.append("manifest_contract_violation")
+        else:
+            manifest_protocol_ids = sorted({record.protocol_id for record in manifest_records})
+            if set(manifest_protocol_ids) != set(analysis_state.protocol_ids):
+                integrity_errors.append("manifest_protocol_id_mismatch")
+            if {record.sample_id for record in manifest_records} != set(analysis_state.sample_ids):
+                integrity_errors.append("manifest_sample_id_mismatch")
+
+    proposition_records = None
+    if sidecars.proposition_path is None or not Path(sidecars.proposition_path).exists():
+        integrity_errors.append(f"{sidecar_prefix}_proposition_records_missing")
+    else:
+        proposition_records = read_top1_proposition_records(sidecars.proposition_path)
+        proposition_state = _inspect_proposition_records(proposition_records)
+        if proposition_state.duplicate_sample_ids:
+            integrity_errors.append("proposition_duplicate_sample_ids")
+        if proposition_state.sample_ids and not proposition_state.sample_ids.issubset(analysis_state.sample_ids):
+            integrity_errors.append("proposition_sample_id_outside_analysis")
+        if len(proposition_state.run_ids) > 1:
+            integrity_errors.append("proposition_mixed_run_ids")
+        if len(proposition_state.protocol_ids) > 1:
+            integrity_errors.append("proposition_mixed_protocol_ids")
+        if proposition_state.run_ids and not set(proposition_state.run_ids).issubset(set(analysis_state.run_ids)):
+            integrity_errors.append("proposition_run_id_mismatch")
+        if proposition_state.protocol_ids and not set(proposition_state.protocol_ids).issubset(set(analysis_state.protocol_ids)):
+            integrity_errors.append("proposition_protocol_id_mismatch")
+
+    if sidecars.model_config_snapshot_path is None or not Path(sidecars.model_config_snapshot_path).exists():
+        integrity_errors.append(f"{sidecar_prefix}_model_config_snapshot_missing")
+
+    integrity_overrides = _finalize_integrity_errors(
+        integrity_errors,
+        allow_integrity_override=allow_integrity_override,
+        inherited_overrides=sidecars.inherited_integrity_overrides,
+    )
+
+    analysis_summary_copy_path = _copy_optional_snapshot(sidecars.analysis_summary_path, output_root / "analysis_summary.json")
+    manifest_snapshot_copy_path = _copy_optional_snapshot(
+        sidecars.manifest_snapshot_path,
+        output_root / "plan_a_manifest_snapshot.jsonl",
+    )
+    proposition_copy_path = _copy_optional_snapshot(
+        sidecars.proposition_path,
+        output_root / "top1_proposition_records.csv",
+    )
+    model_snapshot_copy_path = _copy_optional_snapshot(
+        sidecars.model_config_snapshot_path,
+        output_root / "model_config_snapshot.yaml",
+    )
+
+    run_id = analysis_state.run_ids[0] if len(analysis_state.run_ids) == 1 else "MULTIPLE"
+    protocol_id = analysis_state.protocol_ids[0] if len(analysis_state.protocol_ids) == 1 else "MULTIPLE"
     figure_dpi = int(analysis_config.get("figure_dpi", 200))
 
     scatter_path = write_geometry_scatter(
@@ -629,7 +914,15 @@ def generate_plan_a_artifact_bundle(
         sample_analysis_records,
         output_root / analysis_config.get("cohort_summary_table_name", "cohort_summary_table.csv"),
     )
-    matched_summary = summarize_matched_ambiguous_vs_ood(sample_analysis_records)
+    matched_summary = summarize_matched_ambiguous_vs_ood(
+        sample_analysis_records,
+        positive_cohort=resolved_eval_config["positive_cohort"],
+        negative_cohort=resolved_eval_config["negative_cohort"],
+        primary_pair=resolved_eval_config["primary_pair"],
+        primary_scalar=resolved_eval_config["primary_scalar"],
+        test_size=resolved_eval_config["test_size"],
+        random_state=resolved_eval_config["random_state"],
+    )
     matched_path = write_matched_benchmark_summary(
         matched_summary,
         output_root / analysis_config.get("matched_table_name", "matched_ambiguous_vs_ood_table.csv"),
@@ -643,20 +936,42 @@ def generate_plan_a_artifact_bundle(
         "matched_ambiguous_vs_ood_table": str(matched_path),
     }
     artifact_index_path = write_artifact_path_list(artifact_paths, output_root / "artifact_paths.json")
+    config_snapshot_paths = {
+        "protocol_config_snapshot": str(protocol_snapshot_path),
+        "eval_config_snapshot": str(eval_snapshot_path),
+        "model_config_snapshot": str(
+            model_snapshot_copy_path
+            or sidecars.model_config_snapshot_path
+            or (output_root / "model_config_snapshot.yaml")
+        ),
+    }
+    if analysis_snapshot_path is not None:
+        config_snapshot_paths["analysis_config_snapshot"] = str(analysis_snapshot_path)
     experiment_record_path = write_experiment_record(
         output_path=output_root / "experiment_record.md",
         run_id=run_id,
         protocol_id=protocol_id,
-        config_snapshot_paths={
-            "protocol_config_snapshot": str(protocol_snapshot_path),
-            "eval_config_snapshot": str(eval_snapshot_path),
-            "model_config_snapshot": str(output_root / "model_config_snapshot.yaml"),
-        },
-        manifest_snapshot_path=str(output_root / "plan_a_manifest_snapshot.jsonl"),
+        config_snapshot_paths=config_snapshot_paths,
+        manifest_snapshot_path=str(
+            manifest_snapshot_copy_path
+            or sidecars.manifest_snapshot_path
+            or (output_root / "plan_a_manifest_snapshot.jsonl")
+        ),
         analysis_record_path=str(analysis_record_path),
-        proposition_record_path=str(output_root / "top1_proposition_records.csv"),
+        proposition_record_path=str(
+            proposition_copy_path
+            or sidecars.proposition_path
+            or (output_root / "top1_proposition_records.csv")
+        ),
         artifact_paths={**artifact_paths, "artifact_paths": str(artifact_index_path)},
         matched_summary=matched_summary,
+        checkpoint_path=sidecars.checkpoint_path,
+        analysis_summary_path=str(analysis_summary_copy_path or sidecars.analysis_summary_path or ""),
+        sidecar_resolution_mode=sidecars.sidecar_resolution_mode,
+        integrity_overrides=integrity_overrides,
+        source_run_ids=analysis_state.run_ids,
+        source_protocol_ids=analysis_state.protocol_ids,
+        resolved_eval_config=resolved_eval_config,
     )
 
     return {
@@ -665,6 +980,7 @@ def generate_plan_a_artifact_bundle(
         "output_dir": str(output_root),
         "protocol_snapshot_path": str(protocol_snapshot_path),
         "eval_snapshot_path": str(eval_snapshot_path),
+        "analysis_summary_path": str(analysis_summary_copy_path or sidecars.analysis_summary_path or ""),
         "artifact_index_path": str(artifact_index_path),
         "experiment_record_path": str(experiment_record_path),
         **artifact_paths,
@@ -718,6 +1034,7 @@ def write_plan_a_experiment_bundle(
     )
     artifact_outputs = generate_plan_a_artifact_bundle(
         analysis_path=inference_outputs["analysis_path"],
+        analysis_summary_path=inference_outputs["analysis_summary_path"],
         protocol_config_path=analysis_protocol_config_path,
         eval_config_path=eval_config_path,
         analysis_config_path=analysis_config_path,
@@ -744,6 +1061,7 @@ def write_plan_a_experiment_bundle(
         "best_checkpoint_path": train_outputs["best_checkpoint_path"],
         "analysis_manifest_path": analysis_manifest_outputs["manifest_path"],
         "analysis_path": inference_outputs["analysis_path"],
+        "analysis_summary_path": inference_outputs["analysis_summary_path"],
         "artifact_index_path": artifact_outputs["artifact_index_path"],
         "experiment_record_path": artifact_outputs["experiment_record_path"],
         "bundle_path": str(bundle_path),

@@ -16,9 +16,15 @@ from frcnet.workflows import generate_plan_a_artifact_bundle
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate Plan A paper-facing artifacts.")
     parser.add_argument("--analysis-path", required=True)
+    parser.add_argument("--analysis-summary-path", default=None)
     parser.add_argument("--protocol-config", default="configs/protocol/plan_a_v1.yaml")
     parser.add_argument("--analysis-config", default="configs/analysis/plan_a_artifacts.yaml")
     parser.add_argument("--eval-config", default="configs/eval/plan_a_matched_ambiguous_vs_ood.yaml")
+    parser.add_argument(
+        "--allow-integrity-override",
+        action="store_true",
+        help="Allow report generation to continue after bundle integrity failures and record the override.",
+    )
     parser.add_argument("--output-dir", required=True)
     return parser.parse_args()
 
@@ -27,10 +33,12 @@ def main() -> int:
     args = parse_args()
     outputs = generate_plan_a_artifact_bundle(
         analysis_path=args.analysis_path,
+        analysis_summary_path=args.analysis_summary_path,
         protocol_config_path=args.protocol_config,
         eval_config_path=args.eval_config,
         analysis_config_path=args.analysis_config,
         output_dir=args.output_dir,
+        allow_integrity_override=args.allow_integrity_override,
     )
     print(outputs["experiment_record_path"])
     print(outputs["artifact_index_path"])

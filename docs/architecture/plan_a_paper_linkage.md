@@ -3,7 +3,7 @@
 - document_id: arch_plan_a_paper_linkage
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-19
 
 ## 1. 目标
 
@@ -82,6 +82,17 @@
 
 - `sample_analysis_records.csv`
 
+### 4.2.1 Analysis Export Summary
+
+作用:
+
+- 把 analysis CSV 与 checkpoint、manifest snapshot、proposition view、model config snapshot 绑定成单一 sidecar
+- 为 report 阶段提供规范 sidecar 入口, 避免 sibling 猜测
+
+主文件:
+
+- `analysis_summary.json`
+
 ### 4.3 Top1 Proposition View
 
 作用:
@@ -112,5 +123,4 @@
 
 当前方案 A 的最小追踪链为:
 
-`plan_a_paper_linkage -> plan_a_v1.yaml -> plan_a_manifest.jsonl -> sample_analysis_records.csv -> artifacts -> experiment_record.md`
-
+`plan_a_paper_linkage -> plan_a_v1.yaml -> plan_a_manifest.jsonl -> sample_analysis_records.csv + analysis_summary.json -> artifacts -> experiment_record.md`

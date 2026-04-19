@@ -131,11 +131,33 @@ python scripts/run_plan_a_inference.py \
   --protocol-config configs/protocol/plan_a_v1.yaml \
   --model-config configs/model/frcnet_resnet18_base.yaml \
   --manifest-path artifacts/reports/generated/plan_a_v1/plan_a_manifest.jsonl \
+  --checkpoint-path artifacts/experiments/RUN-LOCAL/training/checkpoints/checkpoint_best.pt \
   --output-dir artifacts/reports/generated/RUN-LOCAL
 python scripts/generate_plan_a_artifacts.py \
   --analysis-path artifacts/reports/generated/RUN-LOCAL/sample_analysis_records.csv \
+  --analysis-summary-path artifacts/reports/generated/RUN-LOCAL/analysis_summary.json \
   --protocol-config configs/protocol/plan_a_v1.yaml \
   --analysis-config configs/analysis/plan_a_artifacts.yaml \
   --eval-config configs/eval/plan_a_matched_ambiguous_vs_ood.yaml \
   --output-dir artifacts/reports/generated/RUN-LOCAL
 ```
+
+Integrity overrides remain available for explicit debug or review workflows only:
+
+```bash
+python scripts/run_plan_a_inference.py \
+  --protocol-config configs/protocol/plan_a_v1.yaml \
+  --model-config configs/model/frcnet_resnet18_base.yaml \
+  --manifest-path artifacts/reports/generated/plan_a_v1/plan_a_manifest.jsonl \
+  --allow-missing-checkpoint \
+  --output-dir artifacts/reports/generated/RUN-DEBUG
+python scripts/generate_plan_a_artifacts.py \
+  --analysis-path artifacts/reports/generated/RUN-DEBUG/sample_analysis_records.csv \
+  --allow-integrity-override \
+  --protocol-config configs/protocol/plan_a_v1.yaml \
+  --analysis-config configs/analysis/plan_a_artifacts.yaml \
+  --eval-config configs/eval/plan_a_matched_ambiguous_vs_ood.yaml \
+  --output-dir artifacts/reports/generated/RUN-DEBUG
+```
+
+These override paths are recorded in `analysis_summary.json` and `experiment_record.md` and are not the default experiment workflow.

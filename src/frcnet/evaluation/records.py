@@ -78,6 +78,46 @@ class Top1PropositionRecord:
         }
 
 
+@dataclass(slots=True)
+class AnalysisExportSummary:
+    run_id: str
+    protocol_id: str
+    analysis_path: str
+    checkpoint_path: str | None
+    manifest_snapshot_path: str
+    model_config_snapshot_path: str
+    proposition_path: str
+    integrity_overrides: tuple[str, ...] = ()
+    sidecar_resolution_mode: str = "analysis_summary"
+
+    def to_dict(self) -> dict[str, str | list[str] | None]:
+        return {
+            "run_id": self.run_id,
+            "protocol_id": self.protocol_id,
+            "analysis_path": self.analysis_path,
+            "checkpoint_path": self.checkpoint_path,
+            "manifest_snapshot_path": self.manifest_snapshot_path,
+            "model_config_snapshot_path": self.model_config_snapshot_path,
+            "proposition_path": self.proposition_path,
+            "integrity_overrides": list(self.integrity_overrides),
+            "sidecar_resolution_mode": self.sidecar_resolution_mode,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> "AnalysisExportSummary":
+        return cls(
+            run_id=str(payload["run_id"]),
+            protocol_id=str(payload["protocol_id"]),
+            analysis_path=str(payload["analysis_path"]),
+            checkpoint_path=None if payload.get("checkpoint_path") in {None, ""} else str(payload["checkpoint_path"]),
+            manifest_snapshot_path=str(payload["manifest_snapshot_path"]),
+            model_config_snapshot_path=str(payload["model_config_snapshot_path"]),
+            proposition_path=str(payload["proposition_path"]),
+            integrity_overrides=tuple(str(value) for value in payload.get("integrity_overrides", [])),
+            sidecar_resolution_mode=str(payload.get("sidecar_resolution_mode", "analysis_summary")),
+        )
+
+
 def write_sample_analysis_records(
     records: list[SampleAnalysisRecord],
     output_path: str | Path,
@@ -138,3 +178,37 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
             )
     return records
 
+
+def read_top1_proposition_records(input_path: str | Path) -> list[Top1PropositionRecord]:
+    records: list[Top1PropositionRecord] = []
+    with Path(input_path).open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            records.append(
+                Top1PropositionRecord(
+                    run_id=row["run_id"],
+                    protocol_id=row["protocol_id"],
+                    sample_id=row["sample_id"],
+                    split_name=row["split_name"],
+                    cohort_name=row["cohort_name"],
+                    proposition_target_type=row["proposition_target_type"],
+                    predicted_class_index=int(row["predicted_class_index"]),
+                    class_label=int(row["class_label"]),
+                    source_class_label=None if row["source_class_label"] == "" else int(row["source_class_label"]),
+                    is_top1_correct=bool(int(row["is_top1_correct"])),
+                    candidate_class_indices=tuple(json.loads(row["candidate_class_indices_json"])),
+                )
+            )
+    return records
+
+
+def write_analysis_export_summary(summary: AnalysisExportSummary, output_path: str | Path) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(summary.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+    return output
+
+
+def read_analysis_export_summary(input_path: str | Path) -> AnalysisExportSummary:
+    payload = json.loads(Path(input_path).read_text(encoding="utf-8"))
+    return AnalysisExportSummary.from_dict(payload)
