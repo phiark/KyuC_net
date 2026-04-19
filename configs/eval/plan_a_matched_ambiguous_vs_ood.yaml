@@ -1,0 +1,9 @@
+eval:
+  benchmark_name: plan_a_matched_ambiguous_vs_ood
+  positive_cohort: ambiguous_id
+  negative_cohort: ood
+  primary_pair: resolution_ratio__content_entropy
+  primary_scalar: completion_score_beta_0_1
+  test_size: 0.3
+  random_state: 7
+

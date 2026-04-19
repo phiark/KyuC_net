@@ -24,6 +24,8 @@ class LossBreakdown:
     loss_unknown: torch.Tensor
     loss_ambiguous: torch.Tensor
     loss_total: torch.Tensor
+    num_trainable_samples: int
+    optimizer_step_performed: bool = False
 
 
 def _cohort_mask(cohort_names: list[str], accepted_names: set[str], device: torch.device) -> torch.Tensor:
@@ -35,8 +37,8 @@ def _safe_log(probabilities: torch.Tensor) -> torch.Tensor:
     return torch.log(probabilities.clamp_min(epsilon))
 
 
-def _zero_scalar(reference_tensor: torch.Tensor) -> torch.Tensor:
-    return reference_tensor.new_zeros(())
+def _connected_zero(reference_tensor: torch.Tensor) -> torch.Tensor:
+    return reference_tensor * 0.0
 
 
 def _normalize_loss_config(loss_config: LossConfig | Mapping[str, float] | None) -> LossConfig:
@@ -61,18 +63,18 @@ def compute_total_loss(
     ambiguous_mask = _cohort_mask(batch_input.cohort_name, {"ambiguous_id"}, device)
     unknown_mask = _cohort_mask(batch_input.cohort_name, {"unknown_supervision"}, device)
 
-    loss_id = _zero_scalar(reference)
+    loss_id = _connected_zero(reference)
     if bool(id_mask.any()):
         target_index = batch_input.class_label[id_mask].long()
         selected_mass = model_output.class_mass[id_mask].gather(1, target_index.unsqueeze(1)).squeeze(1)
         loss_id = (-_safe_log(selected_mass)).mean()
 
-    loss_unknown = _zero_scalar(reference)
+    loss_unknown = _connected_zero(reference)
     if bool(unknown_mask.any()):
         selected_unknown_mass = model_output.unknown_mass[unknown_mask]
         loss_unknown = (-_safe_log(selected_unknown_mass)).mean()
 
-    loss_ambiguous = _zero_scalar(reference)
+    loss_ambiguous = _connected_zero(reference)
     if bool(ambiguous_mask.any()):
         if batch_input.candidate_class_mask is None:
             raise ValueError("candidate_class_mask is required for ambiguous_id samples.")
@@ -95,10 +97,11 @@ def compute_total_loss(
         + (resolved_config.weight_unknown * loss_unknown)
         + (resolved_config.weight_ambiguous * loss_ambiguous)
     )
+    num_trainable_samples = int(id_mask.sum().item() + ambiguous_mask.sum().item() + unknown_mask.sum().item())
     return LossBreakdown(
         loss_id=loss_id,
         loss_unknown=loss_unknown,
         loss_ambiguous=loss_ambiguous,
         loss_total=loss_total,
+        num_trainable_samples=num_trainable_samples,
     )
-

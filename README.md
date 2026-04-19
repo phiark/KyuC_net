@@ -50,10 +50,12 @@ Installation notes by platform are documented in [Runtime Environment Matrix](do
 - [Naming And Identifier Standard](docs/governance/naming_and_identifier_standard.md)
 - [System Requirements Specification](docs/requirements/system_requirements_specification.md)
 - [Architecture Description](docs/architecture/architecture_description.md)
+- [Plan A Paper Linkage](docs/architecture/plan_a_paper_linkage.md)
 - [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md)
 - [Project Structure](docs/architecture/project_structure.md)
 - [Verification And Validation Plan](docs/verification/verification_and_validation_plan.md)
 - [ADR-0001 Document-Driven Baseline](records/decisions/adr_0001_document_driven_baseline.md)
+- [ADR-0002 Plan A Protocol Baseline](records/decisions/adr_0002_plan_a_protocol_baseline.md)
 
 ## Repository Layout
 
@@ -77,6 +79,7 @@ The repository now contains:
 - a minimal FRCNet 0.1 model core
 - cross-platform runtime resolution for MPS / ROCm / CUDA / CPU
 - contract tests and smoke training tests
+- a Plan A protocol chain from manifest to analysis record to paper-facing artifacts
 
 ## Quick Start
 
@@ -93,4 +96,46 @@ Run the test suite:
 
 ```bash
 pytest
+```
+
+## Plan A Workflow
+
+The repository now provides both the paper-facing analysis chain and the training / experiment launch chain needed to produce paper data.
+
+Prepare datasets and verify local availability:
+
+```bash
+python scripts/prepare_plan_a_data.py
+```
+
+Train on the manifest-backed Plan A training protocol:
+
+```bash
+python scripts/train_plan_a.py \
+  --protocol-config configs/protocol/plan_a_v1_train.yaml \
+  --model-config configs/model/frcnet_resnet18_base.yaml \
+  --train-config configs/train/plan_a_train_base.yaml
+```
+
+Run the full training -> analysis -> artifact bundle in one command:
+
+```bash
+python scripts/run_plan_a_experiment.py
+```
+
+Analysis-only export remains available as a separate chain:
+
+```bash
+python scripts/build_plan_a_manifest.py --protocol-config configs/protocol/plan_a_v1.yaml
+python scripts/run_plan_a_inference.py \
+  --protocol-config configs/protocol/plan_a_v1.yaml \
+  --model-config configs/model/frcnet_resnet18_base.yaml \
+  --manifest-path artifacts/reports/generated/plan_a_v1/plan_a_manifest.jsonl \
+  --output-dir artifacts/reports/generated/RUN-LOCAL
+python scripts/generate_plan_a_artifacts.py \
+  --analysis-path artifacts/reports/generated/RUN-LOCAL/sample_analysis_records.csv \
+  --protocol-config configs/protocol/plan_a_v1.yaml \
+  --analysis-config configs/analysis/plan_a_artifacts.yaml \
+  --eval-config configs/eval/plan_a_matched_ambiguous_vs_ood.yaml \
+  --output-dir artifacts/reports/generated/RUN-LOCAL
 ```

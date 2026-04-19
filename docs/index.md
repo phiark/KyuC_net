@@ -31,6 +31,7 @@
 ### 3.3 Architecture
 
 - [架构说明](architecture/architecture_description.md)
+- [方案 A 论文连接说明](architecture/plan_a_paper_linkage.md)
 - [运行环境矩阵](architecture/runtime_environment_matrix.md)
 - [项目结构说明](architecture/project_structure.md)
 
@@ -42,6 +43,7 @@
 
 - [证据与追踪策略](records/evidence_and_traceability_policy.md)
 - [ADR-0001 文档驱动基线](../records/decisions/adr_0001_document_driven_baseline.md)
+- [ADR-0002 方案 A 协议基线](../records/decisions/adr_0002_plan_a_protocol_baseline.md)
 
 ### 3.6 Templates
 

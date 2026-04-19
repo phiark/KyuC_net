@@ -107,6 +107,6 @@ def move_batch_to_device(batch_input: BatchInput, runtime_spec: RuntimeSpec) -> 
         split_name=list(batch_input.split_name),
         cohort_name=list(batch_input.cohort_name),
         source_dataset_name=list(batch_input.source_dataset_name),
+        source_class_label=list(batch_input.source_class_label) if batch_input.source_class_label is not None else None,
         candidate_class_mask=candidate_class_mask,
     )
-

@@ -134,6 +134,7 @@ input sample
 - `split_name`
 - `cohort_name`
 - `source_dataset_name`
+- `source_class_label` 可选
 - `candidate_class_set` 可选
 
 ### 4.2 Model Output Contract
@@ -153,11 +154,14 @@ input sample
 样本级分析表至少应包含:
 
 - `run_id`
+- `protocol_id`
 - `sample_id`
 - `split_name`
 - `cohort_name`
+- `source_dataset_name`
+- `source_class_label`
 - `predicted_class_index`
-- `target_class_index`
+- `class_label`
 - `resolution_ratio`
 - `unknown_mass`
 - `content_entropy`
@@ -186,4 +190,3 @@ input sample
 - 是否在首轮就引入可选的 `weighted_pair = resolution_ratio * content_entropy`
 - 是否把 `top1 correctness proposition` 作为评估层专用对象, 而不是训练时显式对象
 - 是否需要在初始化阶段就固定 analysis schema 为 parquet/csv 双输出
-

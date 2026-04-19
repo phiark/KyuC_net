@@ -32,6 +32,7 @@ def test_move_batch_to_device_preserves_metadata():
     assert moved_batch.sample_id == batch_input.sample_id
     assert moved_batch.cohort_name == batch_input.cohort_name
     assert moved_batch.source_dataset_name == batch_input.source_dataset_name
+    assert moved_batch.source_class_label == batch_input.source_class_label
     assert moved_batch.candidate_class_mask is not None
     assert moved_batch.candidate_class_mask.dtype is torch.bool
 
@@ -51,3 +52,10 @@ def test_validate_batch_input_requires_candidate_mask_for_ambiguous():
     with pytest.raises(ValueError):
         validate_batch_input(missing_candidate_batch, num_classes=10)
 
+
+def test_validate_batch_input_rejects_out_of_range_class_label():
+    batch_input = build_synthetic_batch()
+    batch_input.class_label[0] = 99
+
+    with pytest.raises(ValueError):
+        validate_batch_input(batch_input, num_classes=10)

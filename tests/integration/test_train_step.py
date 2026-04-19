@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
+from frcnet.data import BatchInput
 from frcnet.models import FRCNetModel
 from frcnet.training import compute_total_loss, run_train_step
 from frcnet.utils import resolve_runtime
@@ -35,6 +37,48 @@ def test_run_train_step_cpu_smoke():
     loss_breakdown = run_train_step(model, batch_input, optimizer, runtime_spec)
 
     assert torch.isfinite(loss_breakdown.loss_total)
+    assert loss_breakdown.optimizer_step_performed is True
+
+
+def test_run_train_step_skips_ood_only_batch():
+    batch_input = BatchInput(
+        image=torch.randn(2, 3, 32, 32, dtype=torch.float32),
+        class_label=torch.tensor([-1, -1], dtype=torch.long),
+        sample_id=["ood-a", "ood-b"],
+        split_name=["train", "train"],
+        cohort_name=["ood", "ood"],
+        source_dataset_name=["svhn", "svhn"],
+        source_class_label=[0, 1],
+        candidate_class_mask=None,
+    )
+    model = FRCNetModel(num_classes=10)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    runtime_spec = resolve_runtime(requested_backend="cpu")
+
+    loss_breakdown = run_train_step(model, batch_input, optimizer, runtime_spec)
+
+    assert loss_breakdown.num_trainable_samples == 0
+    assert loss_breakdown.optimizer_step_performed is False
+    assert loss_breakdown.loss_total.requires_grad
+
+
+def test_run_train_step_rejects_singleton_batch_for_batchnorm_backbone():
+    batch_input = BatchInput(
+        image=torch.randn(1, 3, 32, 32, dtype=torch.float32),
+        class_label=torch.tensor([1], dtype=torch.long),
+        sample_id=["id-a"],
+        split_name=["train"],
+        cohort_name=["easy_id"],
+        source_dataset_name=["cifar10"],
+        source_class_label=[1],
+        candidate_class_mask=None,
+    )
+    model = FRCNetModel(num_classes=10)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    runtime_spec = resolve_runtime(requested_backend="cpu")
+
+    with pytest.raises(ValueError, match="batch_size < 2"):
+        run_train_step(model, batch_input, optimizer, runtime_spec)
 
 
 @torch.no_grad()
@@ -79,4 +123,3 @@ def test_run_train_step_cuda_smoke():
     runtime_spec = resolve_runtime(requested_backend="cuda")
     loss_breakdown = run_train_step(model, batch_input, optimizer, runtime_spec)
     assert torch.isfinite(loss_breakdown.loss_total)
-

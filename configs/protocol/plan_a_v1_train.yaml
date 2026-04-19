@@ -1,0 +1,45 @@
+protocol:
+  protocol_id: plan_a_v1_train
+  seed: 7
+  split_name: train
+  output_root: artifacts/reports/generated
+  num_classes: 10
+  datasets:
+    cifar10:
+      root: data/cifar10
+      train: true
+      download: false
+    svhn:
+      root: data/svhn
+      split: train
+      download: false
+  analysis:
+    easy_id_per_class: 4000
+    hard_id_per_class: 500
+    ambiguous_per_pair: 500
+    ood_count: 5000
+    unknown_supervision_count: 2000
+    dataloader:
+      batch_size: 64
+      drop_last: true
+      num_workers: 0
+  ambiguous:
+    recipe: mixup
+    alpha_min: 0.35
+    alpha_max: 0.65
+    class_pairs:
+      - [3, 5]
+      - [4, 7]
+      - [1, 9]
+  hard_id:
+    recipes:
+      - gaussian_blur
+      - low_res
+    blur_kernel_size: 5
+    blur_sigma: 1.0
+    low_res_size: 16
+  extensions:
+    overlay_enabled: false
+    occlusion_enabled: false
+    noise_enabled: false
+    texture_enabled: false

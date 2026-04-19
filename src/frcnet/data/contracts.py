@@ -18,6 +18,7 @@ class BatchInput:
     split_name: list[str]
     cohort_name: list[str]
     source_dataset_name: list[str]
+    source_class_label: list[int | None] | None = None
     candidate_class_mask: torch.Tensor | None = None
 
     @property
@@ -47,15 +48,38 @@ def validate_batch_input(batch_input: BatchInput, num_classes: int | None = None
     if torch.any(batch_input.class_label < -1):
         raise ValueError("class_label entries must be >= -1.")
 
+    if batch_input.source_class_label is not None and len(batch_input.source_class_label) != batch_size:
+        raise ValueError("source_class_label must contain one entry per batch item when provided.")
+
     ambiguous_indices = [index for index, cohort in enumerate(batch_input.cohort_name) if cohort == "ambiguous_id"]
+    id_indices = [index for index, cohort in enumerate(batch_input.cohort_name) if cohort in {"easy_id", "hard_id"}]
+    ood_indices = [index for index, cohort in enumerate(batch_input.cohort_name) if cohort == "ood"]
     unknown_indices = [
         index for index, cohort in enumerate(batch_input.cohort_name) if cohort == "unknown_supervision"
     ]
+
+    if id_indices:
+        id_labels = batch_input.class_label[id_indices]
+        if torch.any(id_labels.eq(-1)):
+            raise ValueError("easy_id and hard_id samples must use in-domain class labels.")
+        if num_classes is not None:
+            if torch.any(id_labels >= num_classes):
+                raise ValueError("easy_id and hard_id labels must be within [0, num_classes).")
+
+    if ambiguous_indices:
+        ambiguous_labels = batch_input.class_label[ambiguous_indices]
+        if not torch.all(ambiguous_labels.eq(-1)):
+            raise ValueError("ambiguous_id samples must use class_label = -1 and rely on candidate_class_mask.")
 
     if unknown_indices:
         unknown_labels = batch_input.class_label[unknown_indices]
         if not torch.all(unknown_labels.eq(-1)):
             raise ValueError("unknown_supervision samples must use class_label = -1.")
+
+    if ood_indices:
+        ood_labels = batch_input.class_label[ood_indices]
+        if not torch.all(ood_labels.eq(-1)):
+            raise ValueError("ood samples must use class_label = -1.")
 
     if ambiguous_indices and batch_input.candidate_class_mask is None:
         raise ValueError("ambiguous_id samples require candidate_class_mask.")
@@ -72,4 +96,3 @@ def validate_batch_input(batch_input: BatchInput, num_classes: int | None = None
             ambiguous_mask = candidate_mask[ambiguous_indices]
             if torch.any(ambiguous_mask.sum(dim=1) == 0):
                 raise ValueError("Each ambiguous_id sample must expose at least one candidate class.")
-

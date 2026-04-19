@@ -1,0 +1,8 @@
+analysis:
+  figure_dpi: 200
+  geometry_scatter_name: geometry_scatter.png
+  geometry_hexbin_name: geometry_hexbin.png
+  cohort_occupancy_name: cohort_occupancy.png
+  cohort_summary_table_name: cohort_summary_table.csv
+  matched_table_name: matched_ambiguous_vs_ood_table.csv
+
