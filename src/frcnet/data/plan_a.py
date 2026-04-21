@@ -6,7 +6,9 @@ import json
 import random
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+import warnings
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torchvision import datasets
@@ -49,16 +51,28 @@ def _extract_labels(dataset: object) -> list[int]:
     raise ValueError("Dataset must expose either `targets` or `labels`.")
 
 
+def _load_cifar10_dataset(dataset_config: Mapping[str, Any]) -> object:
+    visible_deprecation_warning = getattr(getattr(np, "exceptions", object()), "VisibleDeprecationWarning", None)
+    with warnings.catch_warnings():
+        if visible_deprecation_warning is not None:
+            warnings.filterwarnings(
+                "ignore",
+                message=r"dtype\(\): align should be passed as Python or NumPy boolean.*",
+                category=visible_deprecation_warning,
+            )
+        return datasets.CIFAR10(
+            root=dataset_config["root"],
+            train=bool(dataset_config.get("train", False)),
+            download=bool(dataset_config.get("download", False)),
+        )
+
+
 def load_plan_a_source_datasets(protocol_config: Mapping[str, Any]) -> dict[str, object]:
     datasets_config = protocol_config["datasets"]
     cifar_config = datasets_config["cifar10"]
     svhn_config = datasets_config["svhn"]
     return {
-        "cifar10": datasets.CIFAR10(
-            root=cifar_config["root"],
-            train=bool(cifar_config.get("train", False)),
-            download=bool(cifar_config.get("download", False)),
-        ),
+        "cifar10": _load_cifar10_dataset(cifar_config),
         "svhn": datasets.SVHN(
             root=svhn_config["root"],
             split=svhn_config.get("split", "test"),
@@ -82,10 +96,38 @@ def _pop_indices(index_pool: list[int], count: int) -> list[int]:
     return selected
 
 
+def _distribute_count(total_count: int, num_buckets: int) -> tuple[int, ...]:
+    if num_buckets <= 0:
+        raise ValueError("num_buckets must be positive.")
+    base_count = total_count // num_buckets
+    remainder = total_count % num_buckets
+    return tuple(base_count + (1 if bucket_index < remainder else 0) for bucket_index in range(num_buckets))
+
+
 def _stable_recipe(index: int) -> tuple[str, dict[str, Any]]:
     if index % 2 == 0:
         return "gaussian_blur", {"kernel_size": 5, "sigma": 1.0}
     return "low_res", {"downsample_size": 16}
+
+
+def _resolve_ambiguous_recipes(protocol_config: Mapping[str, Any]) -> tuple[str, ...]:
+    ambiguous_config = protocol_config["ambiguous"]
+    configured_recipes = ambiguous_config.get("recipes")
+    if configured_recipes is None:
+        configured_recipes = [ambiguous_config.get("recipe", "mixup")]
+
+    recipes: list[str] = []
+    for recipe_name in configured_recipes:
+        normalized_name = str(recipe_name).lower()
+        if normalized_name not in recipes:
+            recipes.append(normalized_name)
+
+    extensions_config = protocol_config.get("extensions", {})
+    if bool(extensions_config.get("overlay_enabled", False)) and "overlay" not in recipes:
+        recipes.append("overlay")
+    if bool(extensions_config.get("occlusion_enabled", False)) and "occlusion" not in recipes:
+        recipes.append("occlusion")
+    return tuple(recipes)
 
 
 def build_plan_a_manifest(
@@ -155,30 +197,43 @@ def build_plan_a_manifest(
     alpha_min = float(protocol_config["ambiguous"]["alpha_min"])
     alpha_max = float(protocol_config["ambiguous"]["alpha_max"])
     class_pairs = [tuple(int(class_index) for class_index in pair) for pair in protocol_config["ambiguous"]["class_pairs"]]
+    ambiguous_recipes = _resolve_ambiguous_recipes(protocol_config)
     for pair_index, class_pair in enumerate(class_pairs):
         left_class, right_class = class_pair
         left_indices = _pop_indices(cifar_indices[left_class], ambiguous_per_pair)
         right_indices = _pop_indices(cifar_indices[right_class], ambiguous_per_pair)
-        for ambiguous_index, (left_index, right_index) in enumerate(zip(left_indices, right_indices, strict=True)):
-            alpha = alpha_min if ambiguous_per_pair == 1 else alpha_min + (
-                (alpha_max - alpha_min) * ambiguous_index / (ambiguous_per_pair - 1)
-            )
-            manifest_records.append(
-                SampleManifestRecord(
-                    protocol_id=protocol_id,
-                    sample_id=f"{split_name}_ambiguous_{pair_index}_{ambiguous_index:03d}",
-                    split_name=split_name,
-                    cohort_name="ambiguous_id",
-                    source_dataset_name="cifar10",
-                    source_sample_indices=(left_index, right_index),
-                    source_class_label=None,
-                    class_label=-1,
-                    candidate_class_indices=class_pair,
-                    augmentation_recipe="mixup",
-                    augmentation_parameters={"alpha": alpha},
-                    source_class_labels=class_pair,
+        recipe_counts = _distribute_count(ambiguous_per_pair, len(ambiguous_recipes))
+        ambiguous_cursor = 0
+        for recipe_name, recipe_count in zip(ambiguous_recipes, recipe_counts, strict=True):
+            for recipe_offset in range(recipe_count):
+                left_index = left_indices[ambiguous_cursor]
+                right_index = right_indices[ambiguous_cursor]
+                alpha = alpha_min if ambiguous_per_pair == 1 else alpha_min + (
+                    (alpha_max - alpha_min) * ambiguous_cursor / (ambiguous_per_pair - 1)
                 )
-            )
+                augmentation_parameters = {"alpha": alpha}
+                if recipe_name == "occlusion":
+                    augmentation_parameters["occlusion_fraction"] = float(
+                        protocol_config["ambiguous"].get("occlusion_fraction", 0.35)
+                    )
+
+                manifest_records.append(
+                    SampleManifestRecord(
+                        protocol_id=protocol_id,
+                        sample_id=f"{split_name}_ambiguous_{recipe_name}_{pair_index}_{recipe_offset:03d}",
+                        split_name=split_name,
+                        cohort_name="ambiguous_id",
+                        source_dataset_name="cifar10",
+                        source_sample_indices=(left_index, right_index),
+                        source_class_label=None,
+                        class_label=-1,
+                        candidate_class_indices=class_pair,
+                        augmentation_recipe=recipe_name,
+                        augmentation_parameters=augmentation_parameters,
+                        source_class_labels=class_pair,
+                    )
+                )
+                ambiguous_cursor += 1
 
     ood_indices = _pop_indices(svhn_indices, ood_count)
     for index in ood_indices:
@@ -232,11 +287,29 @@ def _to_tensor(image: Any) -> torch.Tensor:
 
 def _load_record_image(record: SampleManifestRecord, source_datasets: Mapping[str, object]) -> torch.Tensor:
     dataset = source_datasets[record.source_dataset_name]
-    if record.augmentation_recipe == "mixup":
+    if record.augmentation_recipe in {"mixup", "overlay", "occlusion"}:
         left_image, _ = dataset[record.source_sample_indices[0]]
         right_image, _ = dataset[record.source_sample_indices[1]]
+        left_tensor = _to_tensor(left_image)
+        right_tensor = _to_tensor(right_image)
         alpha = float(record.augmentation_parameters["alpha"])
-        return (alpha * _to_tensor(left_image)) + ((1.0 - alpha) * _to_tensor(right_image))
+        if record.augmentation_recipe == "mixup":
+            return (alpha * left_tensor) + ((1.0 - alpha) * right_tensor)
+        if record.augmentation_recipe == "overlay":
+            return torch.clamp(left_tensor + ((1.0 - alpha) * right_tensor), 0.0, 1.0)
+
+        occlusion_fraction = float(record.augmentation_parameters.get("occlusion_fraction", 0.35))
+        patched_tensor = left_tensor.clone()
+        height, width = int(left_tensor.shape[1]), int(left_tensor.shape[2])
+        patch_size = max(1, int(min(height, width) * occlusion_fraction))
+        top = (height - patch_size) // 2
+        left = (width - patch_size) // 2
+        patched_tensor[:, top : top + patch_size, left : left + patch_size] = right_tensor[
+            :,
+            top : top + patch_size,
+            left : left + patch_size,
+        ]
+        return patched_tensor
 
     image, _ = dataset[record.source_sample_indices[0]]
     tensor = _to_tensor(image)

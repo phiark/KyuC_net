@@ -20,10 +20,13 @@ class SampleAnalysisRecord:
     resolution_ratio: float
     unknown_mass: float
     content_entropy: float
+    resolution_weighted_content_entropy: float
     top1_class_mass: float
     top1_content_probability: float
     completion_score_beta_0_1: float
+    completion_score_beta_0_25: float
     completion_score_beta_0_5: float
+    completion_score_beta_0_75: float
     candidate_class_indices: tuple[int, ...] = ()
 
     def to_csv_row(self) -> dict[str, str | float | int]:
@@ -40,10 +43,13 @@ class SampleAnalysisRecord:
             "resolution_ratio": self.resolution_ratio,
             "unknown_mass": self.unknown_mass,
             "content_entropy": self.content_entropy,
+            "resolution_weighted_content_entropy": self.resolution_weighted_content_entropy,
             "top1_class_mass": self.top1_class_mass,
             "top1_content_probability": self.top1_content_probability,
             "completion_score_beta_0_1": self.completion_score_beta_0_1,
+            "completion_score_beta_0_25": self.completion_score_beta_0_25,
             "completion_score_beta_0_5": self.completion_score_beta_0_5,
+            "completion_score_beta_0_75": self.completion_score_beta_0_75,
             "candidate_class_indices_json": json.dumps(list(self.candidate_class_indices)),
         }
 
@@ -155,6 +161,10 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
     with Path(input_path).open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
+            top1_class_mass = float(row["top1_class_mass"])
+            unknown_mass = float(row["unknown_mass"])
+            content_entropy = float(row["content_entropy"])
+            resolution_ratio = float(row["resolution_ratio"])
             records.append(
                 SampleAnalysisRecord(
                     run_id=row["run_id"],
@@ -166,13 +176,22 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
                     source_class_label=None if row["source_class_label"] == "" else int(row["source_class_label"]),
                     class_label=int(row["class_label"]),
                     predicted_class_index=int(row["predicted_class_index"]),
-                    resolution_ratio=float(row["resolution_ratio"]),
-                    unknown_mass=float(row["unknown_mass"]),
-                    content_entropy=float(row["content_entropy"]),
-                    top1_class_mass=float(row["top1_class_mass"]),
+                    resolution_ratio=resolution_ratio,
+                    unknown_mass=unknown_mass,
+                    content_entropy=content_entropy,
+                    resolution_weighted_content_entropy=float(
+                        row.get("resolution_weighted_content_entropy", resolution_ratio * content_entropy)
+                    ),
+                    top1_class_mass=top1_class_mass,
                     top1_content_probability=float(row["top1_content_probability"]),
                     completion_score_beta_0_1=float(row["completion_score_beta_0_1"]),
+                    completion_score_beta_0_25=float(
+                        row.get("completion_score_beta_0_25", top1_class_mass + (0.25 * unknown_mass))
+                    ),
                     completion_score_beta_0_5=float(row["completion_score_beta_0_5"]),
+                    completion_score_beta_0_75=float(
+                        row.get("completion_score_beta_0_75", top1_class_mass + (0.75 * unknown_mass))
+                    ),
                     candidate_class_indices=tuple(json.loads(row["candidate_class_indices_json"])),
                 )
             )

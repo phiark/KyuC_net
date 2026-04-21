@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import warnings
 
+import numpy as np
 import pytest
 
 from frcnet.evaluation import (
@@ -14,6 +16,7 @@ from frcnet.evaluation import (
 )
 from frcnet.models import FRCNetModel
 from frcnet.evaluation.inference import build_sample_analysis_records
+from frcnet.data.plan_a import load_plan_a_source_datasets
 from tests.conftest import build_synthetic_batch
 
 
@@ -29,7 +32,10 @@ def test_sample_analysis_records_expose_paper_fields():
     assert first_record.run_id == "RUN-1"
     assert hasattr(first_record, "resolution_ratio")
     assert hasattr(first_record, "content_entropy")
+    assert hasattr(first_record, "resolution_weighted_content_entropy")
     assert hasattr(first_record, "completion_score_beta_0_1")
+    assert hasattr(first_record, "completion_score_beta_0_25")
+    assert hasattr(first_record, "completion_score_beta_0_75")
 
 
 def test_top1_proposition_records_filter_out_ood_and_unknown():
@@ -75,3 +81,33 @@ def test_matched_summary_rejects_invalid_scalar_name():
 
     with pytest.raises(ValueError, match="Unsupported primary_scalar"):
         summarize_matched_ambiguous_vs_ood(duplicated_records, primary_scalar="predicted_class_index")
+
+
+def test_load_plan_a_source_datasets_suppresses_numpy_visible_deprecation_warning(monkeypatch):
+    protocol_config = {
+        "datasets": {
+            "cifar10": {"root": "data/cifar10", "train": False, "download": False},
+            "svhn": {"root": "data/svhn", "split": "test", "download": False},
+        }
+    }
+
+    class _FakeDataset:
+        def __len__(self):
+            return 1
+
+    def _fake_cifar10(**_kwargs):
+        warnings.warn(
+            "dtype(): align should be passed as Python or NumPy boolean but got `align=0`.",
+            category=np.exceptions.VisibleDeprecationWarning,
+        )
+        return _FakeDataset()
+
+    monkeypatch.setattr("frcnet.data.plan_a.datasets.CIFAR10", _fake_cifar10)
+    monkeypatch.setattr("frcnet.data.plan_a.datasets.SVHN", lambda **_kwargs: _FakeDataset())
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        datasets_payload = load_plan_a_source_datasets(protocol_config)
+
+    assert "cifar10" in datasets_payload
+    assert not any(isinstance(item.message, np.exceptions.VisibleDeprecationWarning) for item in captured)

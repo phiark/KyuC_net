@@ -55,6 +55,7 @@
 | `p_top1` | top-1 class mass | `top1_class_mass` | top-1 的 `class_mass` |
 | `tau` / `τ` | top-1 content probability | `top1_content_probability` | 在 top-1 correctness 命题下是导出量 |
 | `H_cont` | content entropy | `content_entropy` | 对 `content_distribution` 求熵 |
+| `r H_cont` | resolution-weighted content entropy | `resolution_weighted_content_entropy` | 对 `resolution_ratio * content_entropy` 的显式导出 |
 | `H_res` | resolution entropy | `resolution_entropy` | 对 `resolution_ratio` 的二元熵 |
 | `H_3` | ternary entropy | `ternary_entropy` | 对显式状态求熵 |
 | `beta` / `β` | completion policy parameter | `completion_policy_beta` | 下游读出策略参数 |
@@ -107,4 +108,3 @@
 - 不把 `content_distribution` 命名为 `tau`, 因为 `tau` 只是特定命题下的导出量
 - 不把 `completion_score` 当作模型唯一主输出
 - 不在不同文件中混用 `vacuity`, `unknown_mass`, `unresolved_mass` 指向同一对象而不声明
-

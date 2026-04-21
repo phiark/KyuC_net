@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -9,8 +10,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
-
-from frcnet.workflows import timestamp_run_id, write_plan_a_experiment_bundle
+RUNTIME_CACHE_ROOT = REPO_ROOT / ".cache" / "runtime"
+RUNTIME_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(RUNTIME_CACHE_ROOT / "matplotlib"))
+os.environ.setdefault("XDG_CACHE_HOME", str(REPO_ROOT / ".cache"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,10 +34,30 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _make_progress_printer():
+    state = {"batch_active": False}
+
+    def _print_progress(message: str) -> None:
+        if message.startswith("[train-batch] "):
+            payload = message.removeprefix("[train-batch] ")
+            print(f"\r{payload}", end="", flush=True)
+            state["batch_active"] = True
+            return
+        if state["batch_active"]:
+            print("", flush=True)
+            state["batch_active"] = False
+        print(message, flush=True)
+
+    return _print_progress
+
+
 def main() -> int:
+    from frcnet.workflows import timestamp_run_id, write_plan_a_experiment_bundle
+
     args = parse_args()
     run_id = args.run_id or timestamp_run_id()
     output_dir = Path(args.output_dir) if args.output_dir else Path("artifacts/experiments") / run_id
+    progress_callback = _make_progress_printer()
     outputs = write_plan_a_experiment_bundle(
         train_protocol_config_path=args.train_protocol_config,
         analysis_protocol_config_path=args.analysis_protocol_config,
@@ -45,6 +68,7 @@ def main() -> int:
         output_dir=output_dir,
         run_id=run_id,
         download_override=True if args.download else None,
+        progress_callback=progress_callback,
     )
     print(outputs["bundle_path"])
     print(outputs["experiment_record_path"])

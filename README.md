@@ -24,7 +24,7 @@ This repository is initialized so that documents are the source of truth and cod
 
 ## Runtime Support
 
-FRCNet 0.1 targets a single training code path that runs on:
+FRCNet 0.3 targets a single training code path that runs on:
 
 - Apple Silicon macOS with `MPS`
 - Linux with `ROCm`
@@ -76,10 +76,11 @@ Installation notes by platform are documented in [Runtime Environment Matrix](do
 The repository now contains:
 
 - document-driven governance and architecture baselines
-- a minimal FRCNet 0.1 model core
+- a curriculum-capable FRCNet 0.3 model and workflow core
 - cross-platform runtime resolution for MPS / ROCm / CUDA / CPU
 - contract tests and smoke training tests
 - a Plan A protocol chain from manifest to analysis record to paper-facing artifacts
+- a study workflow for frozen-manifest multi-seed evaluation and aggregate reporting
 
 ## Quick Start
 
@@ -100,7 +101,11 @@ pytest
 
 ## Plan A Workflow
 
-The repository now provides both the paper-facing analysis chain and the training / experiment launch chain needed to produce paper data.
+The repository now provides three workflow levels:
+
+- single-step training / inference / artifact scripts
+- single-run end-to-end experiment bundling
+- the default v0.3 multi-seed study workflow for paper-facing results
 
 Prepare datasets and verify local availability:
 
@@ -121,6 +126,21 @@ Run the full training -> analysis -> artifact bundle in one command:
 
 ```bash
 python scripts/run_plan_a_experiment.py
+```
+
+Run the default v0.3 study workflow with a frozen evaluation manifest and aggregate report:
+
+```bash
+python scripts/run_plan_a_study.py \
+  --study-config configs/study/plan_a_v0_3_study.yaml
+```
+
+Rebuild aggregate outputs from an existing study root:
+
+```bash
+python scripts/aggregate_plan_a_study.py \
+  --study-config configs/study/plan_a_v0_3_study.yaml \
+  --study-root artifacts/studies/plan_a_v0_3_main
 ```
 
 Analysis-only export remains available as a separate chain:

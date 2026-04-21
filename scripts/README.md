@@ -16,3 +16,5 @@ Current protocol chain:
 - `run_plan_a_inference.py`: load the manifest, require a checkpoint by default, export sample analysis records, the top-1 proposition view, and `analysis_summary.json`
 - `generate_plan_a_artifacts.py`: generate paper-facing figures, tables, artifact index, and experiment record from `analysis_summary.json` or a validated legacy sibling bundle
 - `run_plan_a_experiment.py`: run dataset preflight, training, analysis inference, and artifact generation as one repeatable bundle
+- `run_plan_a_study.py`: run the v0.3 multi-seed study workflow with a frozen evaluation manifest and optional aggregate report generation
+- `aggregate_plan_a_study.py`: aggregate an existing multi-seed study root into study-level tables, plots, and an aggregate experiment record

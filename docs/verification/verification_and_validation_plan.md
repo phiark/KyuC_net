@@ -43,6 +43,10 @@
 - `VER-INT-005`: 无 checkpoint 的 analysis 导出默认被拒绝, 显式 override 时会留下 provenance 记录
 - `VER-INT-006`: report 流程优先使用 `analysis_summary.json`, 并在 legacy sibling 模式下执行完整性校验
 - `VER-INT-007`: matched benchmark 实际使用的 eval 参数与快照配置一致
+- `VER-INT-008`: phased training 会按阶段切换启用 cohort、loss 和学习率
+- `VER-INT-009`: multi-seed study 会复用同一份 frozen evaluation manifest
+- `VER-INT-010`: aggregate report 能回链到每个 seed run 的记录与 artifact
+- `VER-INT-011`: best checkpoint 的选择遵循 validation pair AUROC -> easy ID top-1 -> train loss 的固定规则
 
 ### 2.4 Scientific Validation
 
@@ -68,9 +72,15 @@
 | `REQ-FN-021` | `VER-CON-005`, `VER-CON-006` |
 | `REQ-FN-022` | `VER-INT-007` |
 | `REQ-FN-023` | `VER-INT-005`, `VER-INT-006` |
+| `REQ-FN-024` | `VER-INT-008` |
+| `REQ-FN-025` | `VER-INT-009` |
+| `REQ-FN-026` | `VER-INT-011` |
+| `REQ-FN-027` | `VER-INT-010` |
+| `REQ-FN-028` | `VER-CON-003`, `VER-INT-007` |
 | `REQ-SCI-001` | `VER-SCI-001` |
 | `REQ-SCI-002` | `VER-SCI-002` |
 | `REQ-SCI-003` | `VER-SCI-004` |
+| `REQ-SCI-004` | `VER-INT-009` |
 
 ## 4. 进入实现前的门槛
 

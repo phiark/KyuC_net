@@ -13,8 +13,14 @@ def top1_class_mass(class_mass: torch.Tensor) -> torch.Tensor:
     return class_mass.max(dim=-1).values
 
 
+def resolution_weighted_content_entropy(
+    resolution_ratio: torch.Tensor,
+    content_entropy_value: torch.Tensor,
+) -> torch.Tensor:
+    return resolution_ratio * content_entropy_value
+
+
 def completion_score(class_mass: torch.Tensor, unknown_mass: torch.Tensor, beta: float) -> torch.Tensor:
     if not 0.0 <= beta <= 1.0:
         raise ValueError("beta must be within [0, 1].")
     return top1_class_mass(class_mass) + (beta * unknown_mass)
-

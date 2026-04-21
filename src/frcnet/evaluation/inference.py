@@ -8,7 +8,12 @@ from torch.utils.data import DataLoader
 from frcnet.data import BatchInput
 from frcnet.evaluation.records import SampleAnalysisRecord, Top1PropositionRecord
 from frcnet.models import FRCNetModel, ModelOutput
-from frcnet.utils import completion_score, content_entropy, move_batch_to_device
+from frcnet.utils import (
+    completion_score,
+    content_entropy,
+    move_batch_to_device,
+    resolution_weighted_content_entropy,
+)
 
 
 def build_sample_analysis_records(
@@ -23,8 +28,11 @@ def build_sample_analysis_records(
     ).squeeze(1)
     record_list: list[SampleAnalysisRecord] = []
     entropy = content_entropy(model_output.content_distribution)
+    weighted_entropy = resolution_weighted_content_entropy(model_output.resolution_ratio, entropy)
     score_beta_0_1 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.1)
+    score_beta_0_25 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.25)
     score_beta_0_5 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.5)
+    score_beta_0_75 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.75)
     top1_class_mass = model_output.class_mass.gather(1, predicted_class_index.unsqueeze(1)).squeeze(1)
 
     candidate_class_mask = batch_input.candidate_class_mask
@@ -50,10 +58,13 @@ def build_sample_analysis_records(
                 resolution_ratio=float(model_output.resolution_ratio[index].item()),
                 unknown_mass=float(model_output.unknown_mass[index].item()),
                 content_entropy=float(entropy[index].item()),
+                resolution_weighted_content_entropy=float(weighted_entropy[index].item()),
                 top1_class_mass=float(top1_class_mass[index].item()),
                 top1_content_probability=float(top1_content_probability[index].item()),
                 completion_score_beta_0_1=float(score_beta_0_1[index].item()),
+                completion_score_beta_0_25=float(score_beta_0_25[index].item()),
                 completion_score_beta_0_5=float(score_beta_0_5[index].item()),
+                completion_score_beta_0_75=float(score_beta_0_75[index].item()),
                 candidate_class_indices=candidate_indices,
             )
         )
@@ -116,4 +127,3 @@ def run_inference_export(
                 )
             )
     return sample_analysis_records
-

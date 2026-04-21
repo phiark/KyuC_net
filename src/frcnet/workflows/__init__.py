@@ -9,12 +9,15 @@ from frcnet.workflows.plan_a import (
     train_plan_a_model,
     write_plan_a_experiment_bundle,
 )
+from frcnet.workflows.study import aggregate_plan_a_study_bundle, run_plan_a_study_bundle
 
 __all__ = [
+    "aggregate_plan_a_study_bundle",
     "build_plan_a_manifest_bundle",
     "export_plan_a_inference_bundle",
     "generate_plan_a_artifact_bundle",
     "prepare_plan_a_datasets",
+    "run_plan_a_study_bundle",
     "timestamp_run_id",
     "train_plan_a_model",
     "write_plan_a_experiment_bundle",

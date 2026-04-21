@@ -1,5 +1,5 @@
 eval:
-  benchmark_name: plan_a_matched_ambiguous_vs_ood
+  benchmark_name: plan_a_v0_3_matched_ambiguous_vs_ood
   positive_cohort: ambiguous_id
   negative_cohort: ood
   primary_pair: resolution_ratio__content_entropy

@@ -167,8 +167,11 @@ input sample
 - `content_entropy`
 - `top1_class_mass`
 - `top1_content_probability`
+- `resolution_weighted_content_entropy`
 - `completion_score_beta_0_1`
+- `completion_score_beta_0_25`
 - `completion_score_beta_0_5`
+- `completion_score_beta_0_75`
 
 ### 4.4 Analysis Export Summary Contract
 

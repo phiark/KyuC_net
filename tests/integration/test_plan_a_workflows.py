@@ -16,6 +16,7 @@ from frcnet.workflows.plan_a import (
     train_plan_a_model,
     write_plan_a_experiment_bundle,
 )
+from frcnet.workflows.study import aggregate_plan_a_study_bundle, run_plan_a_study_bundle
 from tests.conftest import FakeLabelsDataset, FakeTargetsDataset, build_protocol_config
 
 
@@ -81,13 +82,51 @@ def _build_train_payload(tmp_path: Path, *, epochs: int = 1) -> dict:
     }
 
 
+def _build_curriculum_train_payload(tmp_path: Path) -> dict:
+    payload = _build_train_payload(tmp_path, epochs=1)
+    payload["training"] = {
+        "seed": 7,
+        "phases": [
+            {
+                "name": "warmup",
+                "epoch_count": 1,
+                "enabled_cohorts": ["easy_id", "unknown_supervision"],
+            },
+            {
+                "name": "main",
+                "epoch_count": 1,
+                "enabled_cohorts": ["easy_id", "hard_id", "ambiguous_id", "unknown_supervision"],
+                "lr_scale": 0.5,
+            },
+        ],
+    }
+    payload["validation"] = {
+        "dataloader": {
+            "batch_size": 4,
+            "shuffle": False,
+            "drop_last": False,
+            "num_workers": 0,
+            "persistent_workers": False,
+            "pin_memory": False,
+        }
+    }
+    return payload
+
+
 def _build_eval_payload(*, primary_scalar: str = "completion_score_beta_0_1", random_state: int = 7) -> dict:
     return {
         "benchmark_name": "plan_a_matched_ambiguous_vs_ood",
         "positive_cohort": "ambiguous_id",
         "negative_cohort": "ood",
         "primary_pair": "resolution_ratio__content_entropy",
+        "weighted_pair": "resolution_ratio__resolution_weighted_content_entropy",
         "primary_scalar": primary_scalar,
+        "completion_scan_scalars": [
+            "completion_score_beta_0_1",
+            "completion_score_beta_0_25",
+            "completion_score_beta_0_5",
+            "completion_score_beta_0_75",
+        ],
         "test_size": 0.3,
         "random_state": random_state,
     }
@@ -101,6 +140,22 @@ def _build_analysis_payload() -> dict:
         "cohort_occupancy_name": "occupancy.png",
         "cohort_summary_table_name": "summary.csv",
         "matched_table_name": "matched.csv",
+        "completion_scan_table_name": "completion_scan.csv",
+    }
+
+
+def _build_study_payload(tmp_path: Path) -> dict:
+    return {
+        "study_id": "plan_a_v0_3_test",
+        "output_root": str(tmp_path / "studies"),
+        "seeds": [7, 17],
+        "train_protocol_config": str(tmp_path / "protocol_train.yaml"),
+        "analysis_protocol_config": str(tmp_path / "protocol_analysis.yaml"),
+        "model_config": str(tmp_path / "model.yaml"),
+        "train_config": str(tmp_path / "train_curriculum.yaml"),
+        "eval_config": str(tmp_path / "eval.yaml"),
+        "analysis_config": str(tmp_path / "analysis.yaml"),
+        "report_policy": {"ranking_metric": "pair_auroc"},
     }
 
 
@@ -153,6 +208,81 @@ def test_train_plan_a_model_writes_records_and_checkpoints(tmp_path: Path, monke
     assert summary_payload["run_id"] == "RUN-TRAIN-TEST"
     assert summary_payload["manifest"]["num_trainable_records"] > 0
     assert len(summary_payload["epochs"]) == 2
+
+
+def test_train_plan_a_model_supports_curriculum_and_validation_selection(tmp_path: Path, monkeypatch):
+    train_protocol = _build_protocol("train", cifar_train=True, svhn_split="train")
+    validation_protocol = _build_protocol("validation", cifar_train=False, svhn_split="test")
+    protocol_config_path = _write_yaml(tmp_path / "protocol_train.yaml", "protocol", train_protocol)
+    validation_protocol_path = _write_yaml(tmp_path / "protocol_validation.yaml", "protocol", validation_protocol)
+    model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
+    train_config_path = _write_yaml(
+        tmp_path / "train_curriculum.yaml",
+        "train",
+        _build_curriculum_train_payload(tmp_path),
+    )
+    eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
+    validation_manifest_path = _write_manifest(tmp_path / "validation_manifest.jsonl", validation_protocol)
+
+    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+
+    outputs = train_plan_a_model(
+        protocol_config_path=protocol_config_path,
+        model_config_path=model_config_path,
+        train_config_path=train_config_path,
+        output_dir=tmp_path / "train_run",
+        run_id="RUN-CURRICULUM-TEST",
+        validation_protocol_config_path=validation_protocol_path,
+        validation_manifest_path=validation_manifest_path,
+        eval_config_path=eval_config_path,
+    )
+
+    summary_payload = json.loads(Path(outputs["summary_path"]).read_text(encoding="utf-8"))
+    phase_names = [epoch_payload["phase_name"] for epoch_payload in summary_payload["epochs"]]
+
+    assert phase_names == ["warmup", "main"]
+    assert Path(outputs["validation_history_path"]).exists()
+    assert summary_payload["validation"]["checkpoint_selection"] == "validation_pair_auroc_then_easy_id_top1_then_train_mean_loss"
+    assert summary_payload["checkpoints"]["best_epoch"] >= 1
+
+
+def test_train_plan_a_model_emits_batch_progress_messages(tmp_path: Path, monkeypatch):
+    protocol_config_path = _write_yaml(
+        tmp_path / "protocol_train.yaml",
+        "protocol",
+        _build_protocol("train", cifar_train=True, svhn_split="train"),
+    )
+    validation_protocol_path = _write_yaml(
+        tmp_path / "protocol_validation.yaml",
+        "protocol",
+        _build_protocol("validation", cifar_train=False, svhn_split="test"),
+    )
+    model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
+    train_config_path = _write_yaml(
+        tmp_path / "train_curriculum.yaml",
+        "train",
+        _build_curriculum_train_payload(tmp_path),
+    )
+    eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
+    validation_manifest_path = _write_manifest(tmp_path / "validation_manifest.jsonl", _build_protocol("validation", cifar_train=False, svhn_split="test"))
+
+    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+
+    progress_messages: list[str] = []
+    train_plan_a_model(
+        protocol_config_path=protocol_config_path,
+        model_config_path=model_config_path,
+        train_config_path=train_config_path,
+        output_dir=tmp_path / "train_run",
+        run_id="RUN-PROGRESS-TEST",
+        validation_protocol_config_path=validation_protocol_path,
+        validation_manifest_path=validation_manifest_path,
+        eval_config_path=eval_config_path,
+        progress_callback=progress_messages.append,
+    )
+
+    assert any(message.startswith("[train] run_id=") and "device=" in message for message in progress_messages)
+    assert any(message.startswith("[train-batch] ") for message in progress_messages)
 
 
 def test_write_plan_a_experiment_bundle_creates_end_to_end_outputs(tmp_path: Path, monkeypatch):
@@ -208,6 +338,7 @@ def test_write_plan_a_experiment_bundle_creates_end_to_end_outputs(tmp_path: Pat
     assert Path(outputs["artifact_index_path"]).exists()
     assert Path(outputs["experiment_record_path"]).exists()
     assert Path(outputs["bundle_path"]).exists()
+    assert Path(outputs["validation_manifest_path"]).exists()
 
 
 def test_train_plan_a_model_rejects_duplicate_manifest_sample_ids(tmp_path: Path, monkeypatch):
@@ -305,6 +436,8 @@ def test_generate_plan_a_artifact_bundle_uses_analysis_summary_explicit(tmp_path
 
     assert "analysis_summary_explicit" in record_text
     assert matched_rows[0]["scalar_name"] == "completion_score_beta_0_5"
+    assert matched_rows[0]["weighted_pair_name"] == "resolution_ratio__resolution_weighted_content_entropy"
+    assert Path(report_outputs["completion_scan_table"]).exists()
 
 
 def test_generate_plan_a_artifact_bundle_auto_and_legacy_modes(tmp_path: Path, monkeypatch):
@@ -396,3 +529,50 @@ def test_generate_plan_a_artifact_bundle_rejects_mixed_runs_by_default_and_marks
 
     assert "MULTIPLE" in override_text
     assert "analysis_mixed_run_ids" in override_text
+
+
+def test_run_plan_a_study_bundle_and_aggregate_outputs(tmp_path: Path, monkeypatch):
+    train_protocol = _build_protocol("train", cifar_train=True, svhn_split="train")
+    analysis_protocol = _build_protocol("validation", cifar_train=False, svhn_split="test")
+    protocol_train_path = _write_yaml(tmp_path / "protocol_train.yaml", "protocol", train_protocol)
+    protocol_analysis_path = _write_yaml(tmp_path / "protocol_analysis.yaml", "protocol", analysis_protocol)
+    model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
+    train_config_path = _write_yaml(
+        tmp_path / "train_curriculum.yaml",
+        "train",
+        _build_curriculum_train_payload(tmp_path),
+    )
+    eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
+    analysis_config_path = _write_yaml(tmp_path / "analysis.yaml", "analysis", _build_analysis_payload())
+    study_payload = _build_study_payload(tmp_path)
+    study_payload["train_protocol_config"] = str(protocol_train_path)
+    study_payload["analysis_protocol_config"] = str(protocol_analysis_path)
+    study_payload["model_config"] = str(model_config_path)
+    study_payload["train_config"] = str(train_config_path)
+    study_payload["eval_config"] = str(eval_config_path)
+    study_payload["analysis_config"] = str(analysis_config_path)
+    study_config_path = _write_yaml(tmp_path / "study.yaml", "study", study_payload)
+
+    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+
+    outputs = run_plan_a_study_bundle(
+        study_config_path=study_config_path,
+        output_dir=tmp_path / "study_run",
+    )
+
+    study_paths = json.loads(Path(outputs["study_paths_path"]).read_text(encoding="utf-8"))
+    assert Path(outputs["shared_eval_manifest_path"]).exists()
+    assert len(study_paths["runs"]) == 2
+    assert all(
+        run_payload["shared_eval_manifest_path"] == study_paths["shared_eval_manifest_path"]
+        for run_payload in study_paths["runs"]
+    )
+    assert Path(outputs["experiment_record_path"]).exists()
+
+    aggregate_outputs = aggregate_plan_a_study_bundle(
+        study_root=tmp_path / "study_run",
+        study_config_path=study_config_path,
+        output_dir=tmp_path / "study_run" / "aggregate_manual",
+    )
+    assert Path(aggregate_outputs["seed_metrics_path"]).exists()
+    assert Path(aggregate_outputs["metric_summary_path"]).exists()

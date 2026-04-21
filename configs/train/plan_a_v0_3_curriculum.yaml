@@ -1,0 +1,57 @@
+train:
+  output_root: artifacts/studies
+
+  training:
+    seed: 7
+    phases:
+      - name: warmup
+        epoch_count: 5
+        enabled_cohorts: [easy_id, unknown_supervision]
+        lr_scale: 1.0
+      - name: main
+        epoch_count: 25
+        enabled_cohorts: [easy_id, hard_id, ambiguous_id, unknown_supervision]
+        lr_scale: 1.0
+      - name: stabilize
+        epoch_count: 10
+        enabled_cohorts: [easy_id, hard_id, ambiguous_id, unknown_supervision]
+        lr_scale: 0.25
+
+  runtime:
+    backend: auto
+    dtype: float32
+    amp_enabled: false
+    pin_memory: auto
+
+  dataloader:
+    batch_size: 64
+    shuffle: true
+    drop_last: true
+    num_workers: 0
+    persistent_workers: false
+    pin_memory: auto
+
+  optimizer:
+    name: adamw
+    lr: 0.0005
+    weight_decay: 0.0001
+    betas: [0.9, 0.999]
+
+  loss:
+    weight_id: 1.0
+    weight_unknown: 1.0
+    weight_ambiguous: 1.0
+    ambiguous_resolution_target: 0.8
+    ambiguous_resolution_weight: 1.0
+
+  checkpointing:
+    save_every_epochs: 1
+
+  validation:
+    dataloader:
+      batch_size: 128
+      shuffle: false
+      drop_last: false
+      num_workers: 0
+      persistent_workers: false
+      pin_memory: auto

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from frcnet.utils import completion_score, content_entropy
+from frcnet.utils import completion_score, content_entropy, resolution_weighted_content_entropy
 
 
 def test_content_entropy_returns_expected_shape():
@@ -29,3 +29,12 @@ def test_completion_score_rejects_invalid_beta():
     with pytest.raises(ValueError):
         completion_score(torch.ones(1, 2), torch.zeros(1), beta=1.1)
 
+
+def test_resolution_weighted_content_entropy_multiplies_inputs():
+    resolution_ratio = torch.tensor([0.2, 0.8], dtype=torch.float32)
+    entropy = torch.tensor([0.5, 1.5], dtype=torch.float32)
+
+    weighted_entropy = resolution_weighted_content_entropy(resolution_ratio, entropy)
+
+    expected = torch.tensor([0.1, 1.2], dtype=torch.float32)
+    torch.testing.assert_close(weighted_entropy, expected)
