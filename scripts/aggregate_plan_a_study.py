@@ -17,8 +17,8 @@ os.environ.setdefault("XDG_CACHE_HOME", str(REPO_ROOT / ".cache"))
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Aggregate an existing v0.3 Plan A study directory.")
-    parser.add_argument("--study-config", default="configs/study/plan_a_v0_3_study.yaml")
+    parser = argparse.ArgumentParser(description="Aggregate an existing v0.3debug R2 Plan A study directory.")
+    parser.add_argument("--study-config", default="configs/study/plan_a_v0_3debug_r2_study.yaml")
     parser.add_argument("--study-root", required=True)
     parser.add_argument("--output-dir", default=None)
     return parser.parse_args()

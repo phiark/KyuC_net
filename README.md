@@ -51,11 +51,15 @@ Installation notes by platform are documented in [Runtime Environment Matrix](do
 - [System Requirements Specification](docs/requirements/system_requirements_specification.md)
 - [Architecture Description](docs/architecture/architecture_description.md)
 - [Plan A Paper Linkage](docs/architecture/plan_a_paper_linkage.md)
+- [Plan A v0.3debug Protocol](docs/architecture/plan_a_v0_3debug_protocol.md)
+- [Plan A v0.3debug R2 Protocol](docs/architecture/plan_a_v0_3debug_r2_protocol.md)
 - [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md)
 - [Project Structure](docs/architecture/project_structure.md)
 - [Verification And Validation Plan](docs/verification/verification_and_validation_plan.md)
 - [ADR-0001 Document-Driven Baseline](records/decisions/adr_0001_document_driven_baseline.md)
 - [ADR-0002 Plan A Protocol Baseline](records/decisions/adr_0002_plan_a_protocol_baseline.md)
+- [ADR-0004 v0.3debug Theory Alignment Repair](records/decisions/adr_0004_v0_3debug_theory_alignment_repair.md)
+- [ADR-0005 v0.3debug R2 Benchmark And Geometry Repair](records/decisions/adr_0005_v0_3debug_r2_benchmark_and_geometry_repair.md)
 
 ## Repository Layout
 
@@ -76,11 +80,12 @@ Installation notes by platform are documented in [Runtime Environment Matrix](do
 The repository now contains:
 
 - document-driven governance and architecture baselines
-- a curriculum-capable FRCNet 0.3 model and workflow core
+- a curriculum-capable FRCNet 0.3 / v0.3debug model and workflow core
+- a `v0.3debug_r2` repair line with balanced-primary dual export and resolved-side geometry regularization
 - cross-platform runtime resolution for MPS / ROCm / CUDA / CPU
 - contract tests and smoke training tests
-- a Plan A protocol chain from manifest to analysis record to paper-facing artifacts
-- a study workflow for frozen-manifest multi-seed evaluation and aggregate reporting
+- a Plan A protocol chain from manifest to proposition-aware analysis record to paper-facing artifacts
+- a study workflow for frozen-manifest multi-seed evaluation, aggregate reporting, and theory-vs-balanced checkpoint diagnostics
 
 ## Quick Start
 
@@ -105,7 +110,7 @@ The repository now provides three workflow levels:
 
 - single-step training / inference / artifact scripts
 - single-run end-to-end experiment bundling
-- the default v0.3 multi-seed study workflow for paper-facing results
+- the default v0.3debug R2 multi-seed study workflow for paper-facing results
 
 Prepare datasets and verify local availability:
 
@@ -128,20 +133,22 @@ Run the full training -> analysis -> artifact bundle in one command:
 python scripts/run_plan_a_experiment.py
 ```
 
-Run the default v0.3 study workflow with a frozen evaluation manifest and aggregate report:
+Run the default v0.3debug R2 study workflow with a frozen evaluation manifest and aggregate report:
 
 ```bash
 python scripts/run_plan_a_study.py \
-  --study-config configs/study/plan_a_v0_3_study.yaml
+  --study-config configs/study/plan_a_v0_3debug_r2_study.yaml
 ```
 
 Rebuild aggregate outputs from an existing study root:
 
 ```bash
 python scripts/aggregate_plan_a_study.py \
-  --study-config configs/study/plan_a_v0_3_study.yaml \
-  --study-root artifacts/studies/plan_a_v0_3_main
+  --study-config configs/study/plan_a_v0_3debug_r2_study.yaml \
+  --study-root artifacts/studies/plan_a_v0_3debug_r2_main
 ```
+
+In `v0.3debug_r2`, `tau = proposition_truth_ratio` is exported as a proposition diagnostic only. The primary matched benchmark and aggregate AUROC plots compare `pair / weighted_pair / scalar`, while `theory` remains a companion export beside the `balanced` primary line.
 
 Analysis-only export remains available as a separate chain:
 

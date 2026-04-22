@@ -1,0 +1,17 @@
+analysis:
+  figure_dpi: 200
+  geometry_scatter_name: geometry_scatter.png
+  geometry_hexbin_name: geometry_hexbin.png
+  cohort_occupancy_name: cohort_occupancy.png
+  tau_cohort_boxplot_name: tau_cohort_boxplot.png
+  proposition_tau_roc_curve_name: proposition_tau_roc_curve.png
+  proposition_diagnostic_table_name: proposition_diagnostic_table.csv
+  balanced_vs_theory_checkpoint_table_name: balanced_vs_theory_checkpoint_table.csv
+  cohort_summary_table_name: cohort_summary_table.csv
+  matched_table_name: matched_ambiguous_vs_ood_table.csv
+  completion_scan_table_name: completion_scan_table.csv
+  proposition_diagnostic_scalars:
+    - proposition_truth_ratio
+    - resolution_entropy
+    - ternary_entropy
+    - auxiliary_top1_content_probability

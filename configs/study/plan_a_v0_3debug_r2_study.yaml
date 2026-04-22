@@ -1,0 +1,15 @@
+study:
+  study_id: plan_a_v0_3debug_r2_main
+  model_family: frcnet_explicit_unknown
+  output_root: artifacts/studies
+  seeds: [7, 17, 27]
+  train_protocol_config: configs/protocol/plan_a_v0_3debug_r2_train.yaml
+  analysis_protocol_config: configs/protocol/plan_a_v0_3debug_r2_eval.yaml
+  model_config: configs/model/frcnet_resnet18_base.yaml
+  train_config: configs/train/plan_a_v0_3debug_r2_curriculum.yaml
+  eval_config: configs/eval/plan_a_v0_3debug_r2_matched_ambiguous_vs_ood.yaml
+  analysis_config: configs/analysis/plan_a_v0_3debug_r2_artifacts.yaml
+  report_policy:
+    ranking_metric: pair_auroc
+    primary_checkpoint_policy: balanced
+    companion_checkpoint_policies: [theory]

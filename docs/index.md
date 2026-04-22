@@ -3,7 +3,7 @@
 - document_id: docs_index
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-22
 - standard_alignment: iso_8601, iso_iec_ieee_15289, iso_iec_11179_inspired
 
 ## 1. 目的
@@ -33,6 +33,8 @@
 - [架构说明](architecture/architecture_description.md)
 - [方案 A 论文连接说明](architecture/plan_a_paper_linkage.md)
 - [方案 A v0.3 研究协议](architecture/plan_a_v0_3_protocol.md)
+- [方案 A v0.3debug 理论对齐协议](architecture/plan_a_v0_3debug_protocol.md)
+- [方案 A v0.3debug R2 协议](architecture/plan_a_v0_3debug_r2_protocol.md)
 - [运行环境矩阵](architecture/runtime_environment_matrix.md)
 - [项目结构说明](architecture/project_structure.md)
 
@@ -46,6 +48,8 @@
 - [ADR-0001 文档驱动基线](../records/decisions/adr_0001_document_driven_baseline.md)
 - [ADR-0002 方案 A 协议基线](../records/decisions/adr_0002_plan_a_protocol_baseline.md)
 - [ADR-0003 v0.3 研究基线](../records/decisions/adr_0003_v0_3_research_baseline.md)
+- [ADR-0004 v0.3debug 理论对齐修复](../records/decisions/adr_0004_v0_3debug_theory_alignment_repair.md)
+- [ADR-0005 v0.3debug R2 benchmark 与 geometry 修复](../records/decisions/adr_0005_v0_3debug_r2_benchmark_and_geometry_repair.md)
 
 ### 3.6 Templates
 

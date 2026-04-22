@@ -11,7 +11,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import train_test_split
 
-from frcnet.evaluation.records import SampleAnalysisRecord
+from frcnet.evaluation.records import DEFAULT_MODEL_FAMILY, SampleAnalysisRecord
 
 SUPPORTED_PAIR_FEATURES = frozenset(
     {
@@ -25,7 +25,14 @@ SUPPORTED_SCALAR_FEATURES = frozenset(
         "unknown_mass",
         "content_entropy",
         "resolution_weighted_content_entropy",
+        "resolution_entropy",
         "top1_class_mass",
+        "proposition_truth_mass",
+        "proposition_false_mass",
+        "proposition_unknown_mass",
+        "proposition_truth_ratio",
+        "ternary_entropy",
+        "auxiliary_top1_content_probability",
         "top1_content_probability",
         "completion_score_beta_0_1",
         "completion_score_beta_0_25",
@@ -33,7 +40,8 @@ SUPPORTED_SCALAR_FEATURES = frozenset(
         "completion_score_beta_0_75",
     }
 )
-DEFAULT_TAU_SCALAR_NAME = "top1_content_probability"
+SCALAR_NAME_ALIASES = {"top1_content_probability": "auxiliary_top1_content_probability"}
+DEFAULT_TAU_SCALAR_NAME = "proposition_truth_ratio"
 DEFAULT_WEIGHTED_PAIR_NAME = "resolution_ratio__resolution_weighted_content_entropy"
 DEFAULT_COMPLETION_SCAN_SCALARS = (
     "completion_score_beta_0_1",
@@ -80,6 +88,7 @@ class ScalarBenchmarkSummary:
 
 @dataclass(slots=True)
 class MatchedBenchmarkSummary:
+    model_family: str
     protocol_id: str
     run_id: str
     matched_count_per_class: int
@@ -92,16 +101,15 @@ class MatchedBenchmarkSummary:
     pair_auroc: float
     weighted_pair_auroc: float
     scalar_auroc: float
-    tau_scalar_auroc: float
     pair_name: str = "resolution_ratio__content_entropy"
     weighted_pair_name: str = DEFAULT_WEIGHTED_PAIR_NAME
     scalar_name: str = "completion_score_beta_0_1"
-    tau_scalar_name: str = DEFAULT_TAU_SCALAR_NAME
     completion_scan_scalar_names: tuple[str, ...] = DEFAULT_COMPLETION_SCAN_SCALARS
     completion_scan_aurocs: tuple[float, ...] = ()
 
     def to_csv_row(self) -> dict[str, str | int | float]:
         return {
+            "model_family": self.model_family,
             "protocol_id": self.protocol_id,
             "run_id": self.run_id,
             "matched_count_per_class": self.matched_count_per_class,
@@ -117,8 +125,6 @@ class MatchedBenchmarkSummary:
             "weighted_pair_name": self.weighted_pair_name,
             "weighted_pair_auroc": self.weighted_pair_auroc,
             "scalar_auroc": self.scalar_auroc,
-            "tau_scalar_name": self.tau_scalar_name,
-            "tau_scalar_auroc": self.tau_scalar_auroc,
             "completion_scan_scalar_names_json": json.dumps(list(self.completion_scan_scalar_names)),
             "completion_scan_aurocs_json": json.dumps(list(self.completion_scan_aurocs)),
         }
@@ -140,7 +146,8 @@ def _build_scalar_features(records: list[SampleAnalysisRecord], scalar_name: str
         raise ValueError(
             f"Unsupported primary_scalar: {scalar_name}. Supported values: {sorted(SUPPORTED_SCALAR_FEATURES)}"
         )
-    return np.array([float(getattr(record, scalar_name)) for record in records], dtype=np.float64)
+    resolved_scalar_name = SCALAR_NAME_ALIASES.get(scalar_name, scalar_name)
+    return np.array([float(getattr(record, resolved_scalar_name)) for record in records], dtype=np.float64)
 
 
 def _prepare_matched_records(
@@ -256,7 +263,6 @@ def summarize_matched_ambiguous_vs_ood(
     primary_pair: str = "resolution_ratio__content_entropy",
     weighted_pair: str = DEFAULT_WEIGHTED_PAIR_NAME,
     primary_scalar: str = "completion_score_beta_0_1",
-    tau_scalar_name: str = DEFAULT_TAU_SCALAR_NAME,
     completion_scan_scalars: Sequence[str] = DEFAULT_COMPLETION_SCAN_SCALARS,
     test_size: float = 0.3,
     random_state: int = 7,
@@ -273,7 +279,6 @@ def summarize_matched_ambiguous_vs_ood(
     pair_features = _build_pair_features(ordered_records, primary_pair)
     weighted_pair_features = _build_pair_features(ordered_records, weighted_pair)
     scalar_features = _build_scalar_features(ordered_records, primary_scalar)
-    tau_scalar_features = _build_scalar_features(ordered_records, tau_scalar_name)
     completion_scan_summaries = summarize_scalar_benchmarks(
         ordered_records,
         scalar_names=completion_scan_scalars,
@@ -293,9 +298,11 @@ def summarize_matched_ambiguous_vs_ood(
     weighted_pair_probability = weighted_pair_classifier.predict_proba(weighted_pair_features[test_index])[:, 1]
     weighted_pair_auroc = float(roc_auc_score(labels[test_index], weighted_pair_probability))
     scalar_auroc = float(roc_auc_score(labels[test_index], scalar_features[test_index]))
-    tau_scalar_auroc = float(roc_auc_score(labels[test_index], tau_scalar_features[test_index]))
 
     return MatchedBenchmarkSummary(
+        model_family=ordered_records[0].model_family
+        if len({record.model_family for record in ordered_records}) == 1
+        else "MULTIPLE",
         protocol_id=ordered_records[0].protocol_id
         if len({record.protocol_id for record in ordered_records}) == 1
         else "MULTIPLE",
@@ -310,11 +317,9 @@ def summarize_matched_ambiguous_vs_ood(
         pair_auroc=pair_auroc,
         weighted_pair_auroc=weighted_pair_auroc,
         scalar_auroc=scalar_auroc,
-        tau_scalar_auroc=tau_scalar_auroc,
         pair_name=primary_pair,
         weighted_pair_name=weighted_pair,
         scalar_name=primary_scalar,
-        tau_scalar_name=tau_scalar_name,
         completion_scan_scalar_names=tuple(summary.scalar_name for summary in completion_scan_summaries),
         completion_scan_aurocs=tuple(summary.auroc for summary in completion_scan_summaries),
     )

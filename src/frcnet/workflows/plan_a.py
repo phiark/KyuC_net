@@ -19,11 +19,13 @@ import yaml
 from frcnet.analysis import (
     write_artifact_path_list,
     write_completion_scan_table,
+    write_cohort_counts,
     write_cohort_occupancy,
     write_cohort_summary_table,
     write_experiment_record,
     write_geometry_hexbin,
     write_geometry_scatter,
+    write_proposition_diagnostic_table,
     write_scalar_roc_curve,
     write_tau_cohort_boxplot,
 )
@@ -40,6 +42,7 @@ from frcnet.data import (
 )
 from frcnet.evaluation import (
     AnalysisExportSummary,
+    DEFAULT_MODEL_FAMILY,
     build_top1_proposition_records,
     read_analysis_export_summary,
     read_sample_analysis_records,
@@ -80,7 +83,11 @@ class TrainEpochSummary:
     mean_loss_total: float
     mean_loss_id: float
     mean_loss_unknown: float
+    mean_loss_unknown_content: float
     mean_loss_ambiguous: float
+    mean_loss_hard_resolution_floor: float
+    mean_loss_hard_entropy_ceiling: float
+    mean_loss_ambiguous_entropy_floor: float
 
     def to_csv_row(self) -> dict[str, int | float]:
         return asdict(self)
@@ -109,6 +116,8 @@ class ResolvedAnalysisSidecars:
     proposition_path: str | None
     model_config_snapshot_path: str | None
     checkpoint_path: str | None
+    checkpoint_selection_summary_path: str | None
+    model_family: str
     summary_run_id: str | None
     summary_protocol_id: str | None
     sidecar_resolution_mode: str
@@ -122,11 +131,12 @@ class ValidationEpochSummary:
     pair_auroc: float
     weighted_pair_auroc: float
     scalar_auroc: float
-    tau_scalar_auroc: float
     easy_id_top1_accuracy: float
     hard_id_top1_accuracy: float
     ambiguous_candidate_hit_rate: float
-    selected_as_best: bool = False
+    balanced_score: float = 0.0
+    selected_as_best_theory: bool = False
+    selected_as_best_balanced: bool = False
 
     def to_csv_row(self) -> dict[str, int | float]:
         return {
@@ -135,11 +145,13 @@ class ValidationEpochSummary:
             "pair_auroc": self.pair_auroc,
             "weighted_pair_auroc": self.weighted_pair_auroc,
             "scalar_auroc": self.scalar_auroc,
-            "tau_scalar_auroc": self.tau_scalar_auroc,
             "easy_id_top1_accuracy": self.easy_id_top1_accuracy,
             "hard_id_top1_accuracy": self.hard_id_top1_accuracy,
             "ambiguous_candidate_hit_rate": self.ambiguous_candidate_hit_rate,
-            "selected_as_best": int(self.selected_as_best),
+            "balanced_score": self.balanced_score,
+            "selected_as_best": int(self.selected_as_best_theory),
+            "selected_as_best_theory": int(self.selected_as_best_theory),
+            "selected_as_best_balanced": int(self.selected_as_best_balanced),
         }
 
 
@@ -204,13 +216,14 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
             "primary_pair": "resolution_ratio__content_entropy",
             "weighted_pair": "resolution_ratio__resolution_weighted_content_entropy",
             "primary_scalar": "completion_score_beta_0_1",
-            "tau_scalar_name": "top1_content_probability",
+            "tau_scalar_name": "proposition_truth_ratio",
             "completion_scan_scalars": (
                 "completion_score_beta_0_1",
                 "completion_score_beta_0_25",
                 "completion_score_beta_0_5",
                 "completion_score_beta_0_75",
             ),
+            "emit_proposition_diagnostics": True,
             "test_size": 0.3,
             "random_state": 7,
         }
@@ -233,8 +246,9 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
             eval_config.get("weighted_pair", "resolution_ratio__resolution_weighted_content_entropy")
         ),
         "primary_scalar": str(eval_config.get("primary_scalar", "completion_score_beta_0_1")),
-        "tau_scalar_name": str(eval_config.get("tau_scalar_name", "top1_content_probability")),
+        "tau_scalar_name": str(eval_config.get("tau_scalar_name", "proposition_truth_ratio")),
         "completion_scan_scalars": tuple(str(value) for value in completion_scan_scalars),
+        "emit_proposition_diagnostics": bool(eval_config.get("emit_proposition_diagnostics", True)),
         "test_size": float(eval_config.get("test_size", 0.3)),
         "random_state": int(eval_config.get("random_state", 7)),
     }
@@ -279,7 +293,7 @@ def _normalize_training_phases(train_config: Mapping[str, Any]) -> list[TrainPha
                 name=phase_name,
                 epoch_count=epoch_count,
                 enabled_cohorts=enabled_cohorts,
-                loss_overrides=dict(phase_payload.get("loss_weights", {})),
+                loss_overrides=dict(phase_payload.get("loss_overrides", phase_payload.get("loss_weights", {}))),
                 dataloader_overrides=dict(phase_payload.get("dataloader", {})),
                 lr_override=(
                     None
@@ -436,6 +450,8 @@ def _resolve_reference_path(reference: str | None, base_dir: Path) -> Path | Non
     candidate = Path(reference)
     if candidate.is_absolute():
         return candidate
+    if candidate.exists():
+        return candidate
     return base_dir / candidate
 
 
@@ -461,6 +477,8 @@ def _resolve_analysis_sidecars(
                     proposition_path=str(analysis_record_path.parent / "top1_proposition_records.csv"),
                     model_config_snapshot_path=str(analysis_record_path.parent / "model_config_snapshot.yaml"),
                     checkpoint_path=None,
+                    checkpoint_selection_summary_path=None,
+                    model_family=DEFAULT_MODEL_FAMILY,
                     summary_run_id=None,
                     summary_protocol_id=None,
                     sidecar_resolution_mode="legacy_sibling",
@@ -478,6 +496,8 @@ def _resolve_analysis_sidecars(
                 proposition_path=None,
                 model_config_snapshot_path=None,
                 checkpoint_path=None,
+                checkpoint_selection_summary_path=None,
+                model_family=DEFAULT_MODEL_FAMILY,
                 summary_run_id=None,
                 summary_protocol_id=None,
                 sidecar_resolution_mode=resolution_mode,
@@ -514,6 +534,12 @@ def _resolve_analysis_sidecars(
                 if summary.checkpoint_path is None
                 else str(_resolve_reference_path(summary.checkpoint_path, summary_path.parent))
             ),
+            checkpoint_selection_summary_path=(
+                None
+                if summary.checkpoint_selection_summary_path is None
+                else str(_resolve_reference_path(summary.checkpoint_selection_summary_path, summary_path.parent))
+            ),
+            model_family=summary.model_family,
             summary_run_id=summary.run_id,
             summary_protocol_id=summary.protocol_id,
             sidecar_resolution_mode=resolution_mode,
@@ -629,6 +655,121 @@ def _proposition_accuracy(records, cohort_name: str) -> float:
     return correct_count / len(cohort_records)
 
 
+def _balanced_validation_score(
+    validation_summary: ValidationEpochSummary,
+    weights: Mapping[str, float] | None = None,
+) -> float:
+    resolved_weights = {
+        "pair_auroc": 1.0,
+        "easy_id_top1_accuracy": 1.0,
+        "hard_id_top1_accuracy": 1.0,
+        "ambiguous_candidate_hit_rate": 1.0,
+    }
+    if weights is not None:
+        resolved_weights.update({str(key): float(value) for key, value in weights.items()})
+    score_terms = [
+        resolved_weights["pair_auroc"] * validation_summary.pair_auroc,
+        resolved_weights["easy_id_top1_accuracy"] * validation_summary.easy_id_top1_accuracy,
+        resolved_weights["hard_id_top1_accuracy"] * validation_summary.hard_id_top1_accuracy,
+        resolved_weights["ambiguous_candidate_hit_rate"] * validation_summary.ambiguous_candidate_hit_rate,
+    ]
+    weight_total = sum(resolved_weights.values())
+    if weight_total <= 0.0:
+        raise ValueError("Balanced checkpoint selection weights must sum to a positive value.")
+    return sum(score_terms) / weight_total
+
+
+def _resolve_primary_checkpoint_policy(checkpoint_config: Mapping[str, Any]) -> str:
+    return str(checkpoint_config.get("primary_policy", "theory"))
+
+
+def _selection_policy_eligible_phases(
+    selection_policy_config: Mapping[str, Any],
+    policy_name: str,
+) -> tuple[str, ...] | None:
+    phase_names = selection_policy_config.get(policy_name, {}).get("eligible_phases")
+    if phase_names is None:
+        return None
+    return tuple(str(phase_name) for phase_name in phase_names)
+
+
+def _is_policy_phase_eligible(
+    selection_policy_config: Mapping[str, Any],
+    policy_name: str,
+    phase_name: str,
+) -> bool:
+    eligible_phases = _selection_policy_eligible_phases(selection_policy_config, policy_name)
+    if eligible_phases is None:
+        return True
+    return phase_name in eligible_phases
+
+
+def _selection_payload(
+    *,
+    policy_name: str,
+    checkpoint_path: str | Path,
+    epoch_summary: TrainEpochSummary,
+    validation_summary: ValidationEpochSummary | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "policy_name": policy_name,
+        "epoch": epoch_summary.epoch,
+        "phase_name": epoch_summary.phase_name,
+        "checkpoint_path": str(checkpoint_path),
+        "train_metrics": epoch_summary.to_csv_row(),
+    }
+    if validation_summary is not None:
+        payload["validation_metrics"] = validation_summary.to_csv_row()
+    return payload
+
+
+def _write_balanced_vs_theory_checkpoint_table(
+    selection_summary: Mapping[str, Any],
+    output_path: str | Path,
+) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        selection_summary["policies"].get("theory"),
+        selection_summary["policies"].get("balanced"),
+    ]
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        fieldnames = [
+            "policy_name",
+            "epoch",
+            "phase_name",
+            "checkpoint_path",
+            "pair_auroc",
+            "easy_id_top1_accuracy",
+            "hard_id_top1_accuracy",
+            "ambiguous_candidate_hit_rate",
+            "balanced_score",
+            "mean_loss_total",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            if row is None:
+                continue
+            validation_metrics = dict(row.get("validation_metrics", {}))
+            train_metrics = dict(row.get("train_metrics", {}))
+            writer.writerow(
+                {
+                    "policy_name": row.get("policy_name", ""),
+                    "epoch": row.get("epoch", ""),
+                    "phase_name": row.get("phase_name", ""),
+                    "checkpoint_path": row.get("checkpoint_path", ""),
+                    "pair_auroc": validation_metrics.get("pair_auroc", ""),
+                    "easy_id_top1_accuracy": validation_metrics.get("easy_id_top1_accuracy", ""),
+                    "hard_id_top1_accuracy": validation_metrics.get("hard_id_top1_accuracy", ""),
+                    "ambiguous_candidate_hit_rate": validation_metrics.get("ambiguous_candidate_hit_rate", ""),
+                    "balanced_score": validation_metrics.get("balanced_score", ""),
+                    "mean_loss_total": train_metrics.get("mean_loss_total", ""),
+                }
+            )
+    return output
+
+
 def _evaluate_validation_epoch(
     *,
     epoch: int,
@@ -655,22 +796,22 @@ def _evaluate_validation_epoch(
         primary_pair=str(resolved_eval_config["primary_pair"]),
         weighted_pair=str(resolved_eval_config["weighted_pair"]),
         primary_scalar=str(resolved_eval_config["primary_scalar"]),
-        tau_scalar_name=str(resolved_eval_config["tau_scalar_name"]),
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
         random_state=int(resolved_eval_config["random_state"]),
     )
-    return ValidationEpochSummary(
+    validation_summary = ValidationEpochSummary(
         epoch=epoch,
         phase_name=phase_name,
         pair_auroc=matched_summary.pair_auroc,
         weighted_pair_auroc=matched_summary.weighted_pair_auroc,
         scalar_auroc=matched_summary.scalar_auroc,
-        tau_scalar_auroc=matched_summary.tau_scalar_auroc,
         easy_id_top1_accuracy=_proposition_accuracy(proposition_records, "easy_id"),
         hard_id_top1_accuracy=_proposition_accuracy(proposition_records, "hard_id"),
         ambiguous_candidate_hit_rate=_proposition_accuracy(proposition_records, "ambiguous_id"),
     )
+    validation_summary.balanced_score = _balanced_validation_score(validation_summary)
+    return validation_summary
 
 
 def _save_checkpoint(
@@ -720,7 +861,11 @@ def _run_training_epoch(
     loss_total_sum = 0.0
     loss_id_sum = 0.0
     loss_unknown_sum = 0.0
+    loss_unknown_content_sum = 0.0
     loss_ambiguous_sum = 0.0
+    loss_hard_resolution_floor_sum = 0.0
+    loss_hard_entropy_ceiling_sum = 0.0
+    loss_ambiguous_entropy_floor_sum = 0.0
 
     total_batches = len(dataloader)
     for batch_input in dataloader:
@@ -738,7 +883,11 @@ def _run_training_epoch(
             loss_total_sum += float(loss_breakdown.loss_total.detach().item())
             loss_id_sum += float(loss_breakdown.loss_id.detach().item())
             loss_unknown_sum += float(loss_breakdown.loss_unknown.detach().item())
+            loss_unknown_content_sum += float(loss_breakdown.loss_unknown_content.detach().item())
             loss_ambiguous_sum += float(loss_breakdown.loss_ambiguous.detach().item())
+            loss_hard_resolution_floor_sum += float(loss_breakdown.loss_hard_resolution_floor.detach().item())
+            loss_hard_entropy_ceiling_sum += float(loss_breakdown.loss_hard_entropy_ceiling.detach().item())
+            loss_ambiguous_entropy_floor_sum += float(loss_breakdown.loss_ambiguous_entropy_floor.detach().item())
 
         batch_loss_total = float(loss_breakdown.loss_total.detach().item())
         running_loss_total = loss_total_sum / max(optimizer_steps, 1)
@@ -770,7 +919,11 @@ def _run_training_epoch(
         mean_loss_total=loss_total_sum / denominator,
         mean_loss_id=loss_id_sum / denominator,
         mean_loss_unknown=loss_unknown_sum / denominator,
+        mean_loss_unknown_content=loss_unknown_content_sum / denominator,
         mean_loss_ambiguous=loss_ambiguous_sum / denominator,
+        mean_loss_hard_resolution_floor=loss_hard_resolution_floor_sum / denominator,
+        mean_loss_hard_entropy_ceiling=loss_hard_entropy_ceiling_sum / denominator,
+        mean_loss_ambiguous_entropy_floor=loss_ambiguous_entropy_floor_sum / denominator,
     )
 
 
@@ -937,24 +1090,57 @@ def train_plan_a_model(
     total_epoch_count = sum(phase.epoch_count for phase in phases)
     base_loss_config = dict(train_config.get("loss", {}))
     checkpoint_config = dict(train_config.get("checkpointing", {}))
+    selection_policy_config = dict(checkpoint_config.get("selection_policies", {}))
+    balanced_policy_config = dict(selection_policy_config.get("balanced", {}))
+    balanced_score_weights = balanced_policy_config.get("score_weights")
+    primary_policy_name = _resolve_primary_checkpoint_policy(checkpoint_config)
+    if primary_policy_name not in {"theory", "balanced"}:
+        raise ValueError("train.checkpointing.primary_policy must be either `theory` or `balanced`.")
     save_every_epochs = int(checkpoint_config.get("save_every_epochs", 1))
     base_dataloader_config = dict(protocol_config.get("analysis", {}).get("dataloader", {}))
     base_dataloader_config.update(train_config.get("dataloader", {}))
+    model_family = str(train_config.get("model_family", DEFAULT_MODEL_FAMILY))
 
     epoch_history: list[TrainEpochSummary] = []
     validation_history: list[ValidationEpochSummary] = []
     best_checkpoint_path = checkpoints_dir / "checkpoint_best.pt"
+    best_theory_checkpoint_path = checkpoints_dir / "checkpoint_best_theory.pt"
+    best_balanced_checkpoint_path = checkpoints_dir / "checkpoint_best_balanced.pt"
     last_checkpoint_path = checkpoints_dir / "checkpoint_last.pt"
-    best_mean_loss: float | None = None
-    best_validation_summary: ValidationEpochSummary | None = None
-    best_epoch = 0
+    best_theory_mean_loss: float | None = None
+    best_theory_validation_summary: ValidationEpochSummary | None = None
+    best_theory_epoch_summary: TrainEpochSummary | None = None
+    best_theory_epoch = 0
+    best_balanced_mean_loss: float | None = None
+    best_balanced_validation_summary: ValidationEpochSummary | None = None
+    best_balanced_epoch_summary: TrainEpochSummary | None = None
+    best_balanced_epoch = 0
+    last_epoch_summary: TrainEpochSummary | None = None
+    last_validation_summary: ValidationEpochSummary | None = None
 
     validation_manifest_snapshot_path: Path | None = None
     validation_manifest_summary_path: Path | None = None
     validation_history_path: Path | None = None
+    checkpoint_selection_summary_path = records_dir / "checkpoint_selection_summary.json"
     resolved_eval_config = _resolve_eval_config(eval_config_path)
     validation_protocol_id: str | None = None
     validation_dataloader: DataLoader | None = None
+
+    def _save_primary_checkpoint_alias(
+        *,
+        epoch_summary: TrainEpochSummary,
+        validation_summary: ValidationEpochSummary | None,
+    ) -> None:
+        _save_checkpoint(
+            best_checkpoint_path,
+            run_id=resolved_run_id,
+            epoch=epoch_summary.epoch,
+            protocol_id=protocol_config["protocol_id"],
+            model=model,
+            optimizer=optimizer,
+            epoch_summary=epoch_summary,
+            validation_summary=validation_summary,
+        )
     if validation_manifest_path is not None or validation_protocol_config_path is not None:
         if validation_manifest_path is None and validation_protocol_config_path is None:
             raise ValueError("validation manifest selection requires either validation_manifest_path or validation_protocol_config_path.")
@@ -1060,6 +1246,8 @@ def train_plan_a_model(
             epoch_history.append(epoch_summary)
 
             validation_summary: ValidationEpochSummary | None = None
+            theory_phase_eligible = _is_policy_phase_eligible(selection_policy_config, "theory", phase.name)
+            balanced_phase_eligible = _is_policy_phase_eligible(selection_policy_config, "balanced", phase.name)
             if validation_dataloader is not None:
                 validation_summary = _evaluate_validation_epoch(
                     epoch=global_epoch,
@@ -1071,7 +1259,13 @@ def train_plan_a_model(
                     protocol_id=validation_protocol_id or protocol_config["protocol_id"],
                     resolved_eval_config=resolved_eval_config,
                 )
+                validation_summary.balanced_score = _balanced_validation_score(
+                    validation_summary,
+                    weights=balanced_score_weights,
+                )
                 validation_history.append(validation_summary)
+            last_epoch_summary = epoch_summary
+            last_validation_summary = validation_summary
 
             if save_every_epochs > 0 and (global_epoch % save_every_epochs == 0):
                 _save_checkpoint(
@@ -1103,11 +1297,16 @@ def train_plan_a_model(
                 f"loss_total={epoch_summary.mean_loss_total:.4f} "
                 f"loss_id={epoch_summary.mean_loss_id:.4f} "
                 f"loss_unknown={epoch_summary.mean_loss_unknown:.4f} "
-                f"loss_ambiguous={epoch_summary.mean_loss_ambiguous:.4f}"
+                f"loss_unknown_content={epoch_summary.mean_loss_unknown_content:.4f} "
+                f"loss_ambiguous={epoch_summary.mean_loss_ambiguous:.4f} "
+                f"loss_hard_resolution={epoch_summary.mean_loss_hard_resolution_floor:.4f} "
+                f"loss_hard_entropy={epoch_summary.mean_loss_hard_entropy_ceiling:.4f} "
+                f"loss_amb_floor={epoch_summary.mean_loss_ambiguous_entropy_floor:.4f}"
             )
             if validation_summary is not None:
                 epoch_message += (
                     f" val_pair={validation_summary.pair_auroc:.4f}"
+                    f" val_balanced={validation_summary.balanced_score:.4f}"
                     f" val_easy_top1={validation_summary.easy_id_top1_accuracy:.4f}"
                     f" val_hard_top1={validation_summary.hard_id_top1_accuracy:.4f}"
                     f" val_amb_hit={validation_summary.ambiguous_candidate_hit_rate:.4f}"
@@ -1115,11 +1314,16 @@ def train_plan_a_model(
             _emit_progress(progress_callback, epoch_message)
 
             if validation_summary is None:
-                if best_mean_loss is None or epoch_summary.mean_loss_total <= best_mean_loss:
-                    best_mean_loss = epoch_summary.mean_loss_total
-                    best_epoch = global_epoch
+                theory_updated = False
+                balanced_updated = False
+                if theory_phase_eligible and (
+                    best_theory_mean_loss is None or epoch_summary.mean_loss_total <= best_theory_mean_loss
+                ):
+                    best_theory_mean_loss = epoch_summary.mean_loss_total
+                    best_theory_epoch_summary = epoch_summary
+                    best_theory_epoch = global_epoch
                     _save_checkpoint(
-                        best_checkpoint_path,
+                        best_theory_checkpoint_path,
                         run_id=resolved_run_id,
                         epoch=global_epoch,
                         protocol_id=protocol_config["protocol_id"],
@@ -1128,33 +1332,65 @@ def train_plan_a_model(
                         epoch_summary=epoch_summary,
                         validation_summary=validation_summary,
                     )
+                    theory_updated = True
                     _emit_progress(
                         progress_callback,
-                        f"[train] best_checkpoint_updated epoch={global_epoch} criterion=train_mean_loss_total",
+                        f"[train] best_theory_checkpoint_updated epoch={global_epoch} criterion=train_mean_loss_total",
+                    )
+                if balanced_phase_eligible and (
+                    best_balanced_mean_loss is None or epoch_summary.mean_loss_total <= best_balanced_mean_loss
+                ):
+                    best_balanced_mean_loss = epoch_summary.mean_loss_total
+                    best_balanced_epoch_summary = epoch_summary
+                    best_balanced_epoch = global_epoch
+                    _save_checkpoint(
+                        best_balanced_checkpoint_path,
+                        run_id=resolved_run_id,
+                        epoch=global_epoch,
+                        protocol_id=protocol_config["protocol_id"],
+                        model=model,
+                        optimizer=optimizer,
+                        epoch_summary=epoch_summary,
+                        validation_summary=validation_summary,
+                    )
+                    balanced_updated = True
+                    _emit_progress(
+                        progress_callback,
+                        f"[train] best_balanced_checkpoint_updated epoch={global_epoch} criterion=train_mean_loss_total",
+                    )
+                if (primary_policy_name == "theory" and theory_updated) or (
+                    primary_policy_name == "balanced" and balanced_updated
+                ):
+                    _save_primary_checkpoint_alias(
+                        epoch_summary=epoch_summary,
+                        validation_summary=validation_summary,
                     )
                 continue
 
-            candidate_rank = (
+            theory_updated = False
+            balanced_updated = False
+            theory_candidate_rank = (
                 validation_summary.pair_auroc,
                 validation_summary.easy_id_top1_accuracy,
                 -epoch_summary.mean_loss_total,
             )
-            best_rank = None
-            if best_validation_summary is not None and best_mean_loss is not None:
-                best_rank = (
-                    best_validation_summary.pair_auroc,
-                    best_validation_summary.easy_id_top1_accuracy,
-                    -best_mean_loss,
+            theory_best_rank = None
+            if best_theory_validation_summary is not None and best_theory_mean_loss is not None:
+                theory_best_rank = (
+                    best_theory_validation_summary.pair_auroc,
+                    best_theory_validation_summary.easy_id_top1_accuracy,
+                    -best_theory_mean_loss,
                 )
-            if best_rank is None or candidate_rank > best_rank:
-                if best_validation_summary is not None:
-                    best_validation_summary.selected_as_best = False
-                best_mean_loss = epoch_summary.mean_loss_total
-                best_validation_summary = validation_summary
-                best_epoch = global_epoch
-                validation_summary.selected_as_best = True
+            if theory_phase_eligible and (theory_best_rank is None or theory_candidate_rank > theory_best_rank):
+                if best_theory_validation_summary is not None:
+                    best_theory_validation_summary.selected_as_best_theory = False
+                best_theory_mean_loss = epoch_summary.mean_loss_total
+                best_theory_validation_summary = validation_summary
+                best_theory_epoch_summary = epoch_summary
+                best_theory_epoch = global_epoch
+                validation_summary.selected_as_best_theory = True
                 _save_checkpoint(
-                    best_checkpoint_path,
+                    best_theory_checkpoint_path,
                     run_id=resolved_run_id,
                     epoch=global_epoch,
                     protocol_id=protocol_config["protocol_id"],
@@ -1163,13 +1399,71 @@ def train_plan_a_model(
                     epoch_summary=epoch_summary,
                     validation_summary=validation_summary,
                 )
+                theory_updated = True
                 _emit_progress(
                     progress_callback,
                     (
-                        f"[train] best_checkpoint_updated epoch={global_epoch} "
+                        f"[train] best_theory_checkpoint_updated epoch={global_epoch} "
                         f"criterion=validation_pair_auroc_then_easy_id_top1_then_train_mean_loss"
                     ),
                 )
+
+            balanced_candidate_rank = (
+                validation_summary.balanced_score,
+                validation_summary.pair_auroc,
+                -epoch_summary.mean_loss_total,
+            )
+            balanced_best_rank = None
+            if best_balanced_validation_summary is not None and best_balanced_mean_loss is not None:
+                balanced_best_rank = (
+                    best_balanced_validation_summary.balanced_score,
+                    best_balanced_validation_summary.pair_auroc,
+                    -best_balanced_mean_loss,
+                )
+            if balanced_phase_eligible and (balanced_best_rank is None or balanced_candidate_rank > balanced_best_rank):
+                if best_balanced_validation_summary is not None:
+                    best_balanced_validation_summary.selected_as_best_balanced = False
+                best_balanced_mean_loss = epoch_summary.mean_loss_total
+                best_balanced_validation_summary = validation_summary
+                best_balanced_epoch_summary = epoch_summary
+                best_balanced_epoch = global_epoch
+                validation_summary.selected_as_best_balanced = True
+                _save_checkpoint(
+                    best_balanced_checkpoint_path,
+                    run_id=resolved_run_id,
+                    epoch=global_epoch,
+                    protocol_id=protocol_config["protocol_id"],
+                    model=model,
+                    optimizer=optimizer,
+                    epoch_summary=epoch_summary,
+                    validation_summary=validation_summary,
+                )
+                balanced_updated = True
+                _emit_progress(
+                    progress_callback,
+                    (
+                        f"[train] best_balanced_checkpoint_updated epoch={global_epoch} "
+                        f"criterion=validation_balanced_score_then_pair_auroc_then_train_mean_loss"
+                    ),
+                )
+            if (primary_policy_name == "theory" and theory_updated) or (
+                primary_policy_name == "balanced" and balanced_updated
+            ):
+                _save_primary_checkpoint_alias(
+                    epoch_summary=epoch_summary,
+                    validation_summary=validation_summary,
+                )
+
+    if not best_checkpoint_path.exists():
+        fallback_epoch_summary = best_balanced_epoch_summary if primary_policy_name == "balanced" else best_theory_epoch_summary
+        fallback_validation_summary = (
+            best_balanced_validation_summary if primary_policy_name == "balanced" else best_theory_validation_summary
+        )
+        if fallback_epoch_summary is not None:
+            _save_primary_checkpoint_alias(
+                epoch_summary=fallback_epoch_summary,
+                validation_summary=fallback_validation_summary,
+            )
 
     history_path = _write_epoch_history(epoch_history, records_dir / "train_history.csv")
     if validation_history:
@@ -1177,9 +1471,45 @@ def train_plan_a_model(
             validation_history,
             records_dir / "validation_history.csv",
         )
+    checkpoint_selection_summary = {
+        "model_family": model_family,
+        "default_best_policy": primary_policy_name,
+        "default_best_checkpoint_path": str(best_checkpoint_path),
+        "policies": {
+            "theory": None
+            if best_theory_epoch_summary is None
+            else _selection_payload(
+                policy_name="theory",
+                checkpoint_path=best_theory_checkpoint_path,
+                epoch_summary=best_theory_epoch_summary,
+                validation_summary=best_theory_validation_summary,
+            ),
+            "balanced": None
+            if best_balanced_epoch_summary is None
+            else _selection_payload(
+                policy_name="balanced",
+                checkpoint_path=best_balanced_checkpoint_path,
+                epoch_summary=best_balanced_epoch_summary,
+                validation_summary=best_balanced_validation_summary,
+            ),
+            "last": None
+            if last_epoch_summary is None
+            else _selection_payload(
+                policy_name="last",
+                checkpoint_path=last_checkpoint_path,
+                epoch_summary=last_epoch_summary,
+                validation_summary=last_validation_summary,
+            ),
+        },
+    }
+    checkpoint_selection_summary_path = _write_json(
+        checkpoint_selection_summary,
+        checkpoint_selection_summary_path,
+    )
     summary_path = _write_json(
         {
             "run_id": resolved_run_id,
+            "model_family": model_family,
             "protocol_id": protocol_config["protocol_id"],
             "seed": seed,
             "runtime": {
@@ -1219,8 +1549,15 @@ def train_plan_a_model(
             },
             "checkpoints": {
                 "best": str(best_checkpoint_path),
+                "best_policy": primary_policy_name,
+                "best_theory": str(best_theory_checkpoint_path),
+                "best_balanced": str(best_balanced_checkpoint_path),
                 "last": str(last_checkpoint_path),
-                "best_epoch": best_epoch,
+                "best_epoch": best_balanced_epoch if primary_policy_name == "balanced" else best_theory_epoch,
+                "best_theory_epoch": best_theory_epoch,
+                "best_balanced_epoch": best_balanced_epoch,
+                "selection_summary_path": str(checkpoint_selection_summary_path),
+                "selection_policies": selection_policy_config,
             },
             "history_path": str(history_path),
             "validation": {
@@ -1229,10 +1566,19 @@ def train_plan_a_model(
                 "history_path": None if validation_history_path is None else str(validation_history_path),
                 "protocol_id": validation_protocol_id,
                 "checkpoint_selection": (
-                    "validation_pair_auroc_then_easy_id_top1_then_train_mean_loss"
+                    "validation_policy_specific"
                     if validation_history
                     else "train_mean_loss_total"
                 ),
+                "checkpoint_selection_policies": {
+                    "theory": "validation_pair_auroc_then_easy_id_top1_then_train_mean_loss"
+                    if validation_history
+                    else "train_mean_loss_total",
+                    "balanced": "validation_balanced_score_then_pair_auroc_then_train_mean_loss"
+                    if validation_history
+                    else "train_mean_loss_total",
+                },
+                "primary_checkpoint_policy": primary_policy_name,
                 "resolved_eval_config": {
                     "positive_cohort": resolved_eval_config["positive_cohort"],
                     "negative_cohort": resolved_eval_config["negative_cohort"],
@@ -1241,12 +1587,19 @@ def train_plan_a_model(
                     "primary_scalar": resolved_eval_config["primary_scalar"],
                     "tau_scalar_name": resolved_eval_config["tau_scalar_name"],
                     "completion_scan_scalars": list(resolved_eval_config["completion_scan_scalars"]),
+                    "emit_proposition_diagnostics": resolved_eval_config["emit_proposition_diagnostics"],
                     "test_size": resolved_eval_config["test_size"],
                     "random_state": resolved_eval_config["random_state"],
                 },
                 "best_epoch_metrics": None
-                if best_validation_summary is None
-                else best_validation_summary.to_csv_row(),
+                if (best_balanced_validation_summary if primary_policy_name == "balanced" else best_theory_validation_summary)
+                is None
+                else (
+                    best_balanced_validation_summary if primary_policy_name == "balanced" else best_theory_validation_summary
+                ).to_csv_row(),
+                "best_balanced_epoch_metrics": None
+                if best_balanced_validation_summary is None
+                else best_balanced_validation_summary.to_csv_row(),
             },
             "epochs": [record.to_csv_row() for record in epoch_history],
             "validation_epochs": [record.to_csv_row() for record in validation_history],
@@ -1263,6 +1616,7 @@ def train_plan_a_model(
     )
 
     return {
+        "model_family": model_family,
         "run_id": resolved_run_id,
         "protocol_id": protocol_config["protocol_id"],
         "output_dir": str(output_root),
@@ -1275,6 +1629,10 @@ def train_plan_a_model(
         if validation_manifest_snapshot_path is None
         else str(validation_manifest_snapshot_path),
         "best_checkpoint_path": str(best_checkpoint_path),
+        "best_policy_name": primary_policy_name,
+        "best_theory_checkpoint_path": str(best_theory_checkpoint_path),
+        "best_balanced_checkpoint_path": str(best_balanced_checkpoint_path),
+        "checkpoint_selection_summary_path": str(checkpoint_selection_summary_path),
         "last_checkpoint_path": str(last_checkpoint_path),
     }
 
@@ -1287,8 +1645,10 @@ def export_plan_a_inference_bundle(
     output_dir: str | Path,
     run_id: str | None = None,
     checkpoint_path: str | Path | None = None,
+    checkpoint_selection_summary_path: str | Path | None = None,
     batch_size: int | None = None,
     allow_missing_checkpoint: bool = False,
+    model_family: str = DEFAULT_MODEL_FAMILY,
 ) -> dict[str, str]:
     protocol_config = _load_yaml_section(protocol_config_path, "protocol")
     model_config = _load_yaml_section(model_config_path, "model")
@@ -1335,6 +1695,7 @@ def export_plan_a_inference_bundle(
         runtime_spec=runtime_spec,
         run_id=resolved_run_id,
         protocol_id=protocol_config["protocol_id"],
+        model_family=model_family,
     )
     proposition_records = build_top1_proposition_records(sample_analysis_records)
 
@@ -1352,6 +1713,12 @@ def export_plan_a_inference_bundle(
             manifest_snapshot_path=str(manifest_snapshot_path),
             model_config_snapshot_path=str(model_snapshot_path),
             proposition_path=str(proposition_path),
+            checkpoint_selection_summary_path=(
+                None
+                if checkpoint_selection_summary_path is None
+                else str(checkpoint_selection_summary_path)
+            ),
+            model_family=model_family,
             integrity_overrides=tuple(integrity_overrides),
             sidecar_resolution_mode="analysis_summary",
         ),
@@ -1359,6 +1726,7 @@ def export_plan_a_inference_bundle(
     )
 
     return {
+        "model_family": model_family,
         "run_id": resolved_run_id,
         "protocol_id": protocol_config["protocol_id"],
         "output_dir": str(output_root),
@@ -1368,6 +1736,9 @@ def export_plan_a_inference_bundle(
         "analysis_path": str(analysis_path),
         "proposition_path": str(proposition_path),
         "analysis_summary_path": str(analysis_summary_path),
+        "checkpoint_selection_summary_path": ""
+        if checkpoint_selection_summary_path is None
+        else str(checkpoint_selection_summary_path),
     }
 
 
@@ -1387,7 +1758,19 @@ def generate_plan_a_artifact_bundle(
     protocol_snapshot_path = _copy_snapshot(protocol_config_path, output_root / "protocol_config_snapshot.yaml")
     eval_snapshot_path = _copy_snapshot(eval_config_path, output_root / "eval_config_snapshot.yaml")
     resolved_eval_config = _resolve_eval_config(eval_config_path)
-    analysis_config = {"figure_dpi": 200}
+    analysis_config = {
+        "figure_dpi": 200,
+        "cohort_counts_name": "cohort_counts.png",
+        "proposition_diagnostic_table_name": "proposition_diagnostic_table.csv",
+        "proposition_tau_roc_curve_name": "proposition_tau_roc_curve.png",
+        "balanced_vs_theory_checkpoint_table_name": "balanced_vs_theory_checkpoint_table.csv",
+        "proposition_diagnostic_scalars": (
+            "proposition_truth_ratio",
+            "resolution_entropy",
+            "ternary_entropy",
+            "auxiliary_top1_content_probability",
+        ),
+    }
     analysis_snapshot_path: Path | None = None
     if analysis_config_path is not None:
         analysis_payload = _load_yaml_section(analysis_config_path, "analysis")
@@ -1472,9 +1855,18 @@ def generate_plan_a_artifact_bundle(
         sidecars.model_config_snapshot_path,
         output_root / "model_config_snapshot.yaml",
     )
+    checkpoint_selection_summary_copy_path = _copy_optional_snapshot(
+        sidecars.checkpoint_selection_summary_path,
+        output_root / "checkpoint_selection_summary.json",
+    )
 
     run_id = analysis_state.run_ids[0] if len(analysis_state.run_ids) == 1 else "MULTIPLE"
     protocol_id = analysis_state.protocol_ids[0] if len(analysis_state.protocol_ids) == 1 else "MULTIPLE"
+    model_family = (
+        sidecars.model_family
+        if sidecars.model_family != DEFAULT_MODEL_FAMILY or not sample_analysis_records
+        else sample_analysis_records[0].model_family
+    )
     figure_dpi = int(analysis_config.get("figure_dpi", 200))
 
     scatter_path = write_geometry_scatter(
@@ -1490,6 +1882,11 @@ def generate_plan_a_artifact_bundle(
     occupancy_path = write_cohort_occupancy(
         sample_analysis_records,
         output_root / analysis_config.get("cohort_occupancy_name", "cohort_occupancy.png"),
+        dpi=figure_dpi,
+    )
+    cohort_counts_path = write_cohort_counts(
+        sample_analysis_records,
+        output_root / analysis_config.get("cohort_counts_name", "cohort_counts.png"),
         dpi=figure_dpi,
     )
     tau_boxplot_path = write_tau_cohort_boxplot(
@@ -1508,7 +1905,6 @@ def generate_plan_a_artifact_bundle(
         primary_pair=str(resolved_eval_config["primary_pair"]),
         weighted_pair=str(resolved_eval_config["weighted_pair"]),
         primary_scalar=str(resolved_eval_config["primary_scalar"]),
-        tau_scalar_name=str(resolved_eval_config["tau_scalar_name"]),
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
         random_state=int(resolved_eval_config["random_state"]),
@@ -1526,27 +1922,64 @@ def generate_plan_a_artifact_bundle(
         test_size=float(resolved_eval_config["test_size"]),
         random_state=int(resolved_eval_config["random_state"]),
     )
-    tau_roc_curve_path = write_scalar_roc_curve(
-        sample_analysis_records,
-        output_root / analysis_config.get("tau_roc_curve_name", "tau_roc_curve.png"),
-        positive_cohort=str(resolved_eval_config["positive_cohort"]),
-        negative_cohort=str(resolved_eval_config["negative_cohort"]),
-        scalar_name=str(resolved_eval_config["tau_scalar_name"]),
-        test_size=float(resolved_eval_config["test_size"]),
-        random_state=int(resolved_eval_config["random_state"]),
-        dpi=figure_dpi,
-    )
+    proposition_diagnostic_table_path: Path | None = None
+    proposition_tau_roc_curve_path: Path | None = None
+    if bool(resolved_eval_config["emit_proposition_diagnostics"]):
+        proposition_diagnostic_table_path = write_proposition_diagnostic_table(
+            sample_analysis_records,
+            output_root / analysis_config.get("proposition_diagnostic_table_name", "proposition_diagnostic_table.csv"),
+            positive_cohort=str(resolved_eval_config["positive_cohort"]),
+            negative_cohort=str(resolved_eval_config["negative_cohort"]),
+            scalar_names=tuple(analysis_config.get("proposition_diagnostic_scalars", ())),
+            test_size=float(resolved_eval_config["test_size"]),
+            random_state=int(resolved_eval_config["random_state"]),
+        )
+        proposition_tau_roc_curve_path = write_scalar_roc_curve(
+            sample_analysis_records,
+            output_root / analysis_config.get("proposition_tau_roc_curve_name", "proposition_tau_roc_curve.png"),
+            positive_cohort=str(resolved_eval_config["positive_cohort"]),
+            negative_cohort=str(resolved_eval_config["negative_cohort"]),
+            scalar_name=str(resolved_eval_config["tau_scalar_name"]),
+            test_size=float(resolved_eval_config["test_size"]),
+            random_state=int(resolved_eval_config["random_state"]),
+            dpi=figure_dpi,
+        )
+
+    balanced_vs_theory_checkpoint_table_path: Path | None = None
+    if checkpoint_selection_summary_copy_path is not None and checkpoint_selection_summary_copy_path.exists():
+        selection_summary_payload = json.loads(checkpoint_selection_summary_copy_path.read_text(encoding="utf-8"))
+        if (
+            selection_summary_payload.get("policies", {}).get("theory") is not None
+            and selection_summary_payload.get("policies", {}).get("balanced") is not None
+        ):
+            balanced_vs_theory_checkpoint_table_path = _write_balanced_vs_theory_checkpoint_table(
+                selection_summary_payload,
+                output_root
+                / analysis_config.get(
+                    "balanced_vs_theory_checkpoint_table_name",
+                    "balanced_vs_theory_checkpoint_table.csv",
+                ),
+            )
 
     artifact_paths = {
         "geometry_scatter": str(scatter_path),
         "geometry_hexbin": str(hexbin_path),
         "cohort_occupancy": str(occupancy_path),
+        "cohort_counts": str(cohort_counts_path),
         "tau_cohort_boxplot": str(tau_boxplot_path),
-        "tau_roc_curve": str(tau_roc_curve_path),
         "cohort_summary_table": str(summary_path),
         "matched_ambiguous_vs_ood_table": str(matched_path),
         "completion_scan_table": str(completion_scan_path),
     }
+    if proposition_diagnostic_table_path is not None:
+        artifact_paths["proposition_diagnostic_table"] = str(proposition_diagnostic_table_path)
+    if proposition_tau_roc_curve_path is not None:
+        artifact_paths["proposition_tau_roc_curve"] = str(proposition_tau_roc_curve_path)
+        artifact_paths["tau_roc_curve"] = str(proposition_tau_roc_curve_path)
+    if checkpoint_selection_summary_copy_path is not None:
+        artifact_paths["checkpoint_selection_summary"] = str(checkpoint_selection_summary_copy_path)
+    if balanced_vs_theory_checkpoint_table_path is not None:
+        artifact_paths["balanced_vs_theory_checkpoint_table"] = str(balanced_vs_theory_checkpoint_table_path)
     artifact_index_path = write_artifact_path_list(artifact_paths, output_root / "artifact_paths.json")
     config_snapshot_paths = {
         "protocol_config_snapshot": str(protocol_snapshot_path),
@@ -1561,6 +1994,7 @@ def generate_plan_a_artifact_bundle(
         config_snapshot_paths["analysis_config_snapshot"] = str(analysis_snapshot_path)
     experiment_record_path = write_experiment_record(
         output_path=output_root / "experiment_record.md",
+        model_family=model_family,
         run_id=run_id,
         protocol_id=protocol_id,
         config_snapshot_paths=config_snapshot_paths,
@@ -1578,12 +2012,19 @@ def generate_plan_a_artifact_bundle(
         artifact_paths={**artifact_paths, "artifact_paths": str(artifact_index_path)},
         matched_summary=matched_summary,
         checkpoint_path=sidecars.checkpoint_path,
+        checkpoint_selection_summary_path=str(
+            checkpoint_selection_summary_copy_path or sidecars.checkpoint_selection_summary_path or ""
+        ),
+        balanced_vs_theory_checkpoint_table_path=str(balanced_vs_theory_checkpoint_table_path or ""),
         analysis_summary_path=str(analysis_summary_copy_path or sidecars.analysis_summary_path or ""),
         sidecar_resolution_mode=sidecars.sidecar_resolution_mode,
         integrity_overrides=integrity_overrides,
         source_run_ids=analysis_state.run_ids,
         source_protocol_ids=analysis_state.protocol_ids,
         resolved_eval_config=resolved_eval_config,
+        proposition_diagnostic_scalar_name=str(resolved_eval_config["tau_scalar_name"]),
+        proposition_diagnostic_table_path=str(proposition_diagnostic_table_path or ""),
+        proposition_tau_roc_curve_path=str(proposition_tau_roc_curve_path or ""),
     )
 
     return {
@@ -1645,6 +2086,7 @@ def write_plan_a_experiment_bundle(
     )
     _emit_progress(progress_callback, f"[experiment] training_complete best_checkpoint={train_outputs['best_checkpoint_path']}")
 
+    primary_checkpoint_policy = str(train_outputs.get("best_policy_name", "theory"))
     inference_outputs = export_plan_a_inference_bundle(
         protocol_config_path=analysis_protocol_config_path,
         model_config_path=model_config_path,
@@ -1652,6 +2094,8 @@ def write_plan_a_experiment_bundle(
         output_dir=output_root / "analysis",
         run_id=resolved_run_id,
         checkpoint_path=train_outputs["best_checkpoint_path"],
+        checkpoint_selection_summary_path=train_outputs["checkpoint_selection_summary_path"],
+        model_family=train_outputs["model_family"],
     )
     _emit_progress(progress_callback, f"[experiment] analysis_csv={inference_outputs['analysis_path']}")
     artifact_outputs = generate_plan_a_artifact_bundle(
@@ -1663,15 +2107,41 @@ def write_plan_a_experiment_bundle(
         output_dir=output_root / "report",
     )
     _emit_progress(progress_callback, f"[experiment] report_record={artifact_outputs['experiment_record_path']}")
+    companion_outputs: dict[str, Any] = {}
+    if primary_checkpoint_policy != "theory" and Path(train_outputs.get("best_theory_checkpoint_path", "")).exists():
+        theory_inference_outputs = export_plan_a_inference_bundle(
+            protocol_config_path=analysis_protocol_config_path,
+            model_config_path=model_config_path,
+            manifest_path=analysis_manifest_outputs["manifest_path"],
+            output_dir=output_root / "analysis_theory",
+            run_id=resolved_run_id,
+            checkpoint_path=train_outputs["best_theory_checkpoint_path"],
+            checkpoint_selection_summary_path=train_outputs["checkpoint_selection_summary_path"],
+            model_family=train_outputs["model_family"],
+        )
+        theory_artifact_outputs = generate_plan_a_artifact_bundle(
+            analysis_path=theory_inference_outputs["analysis_path"],
+            analysis_summary_path=theory_inference_outputs["analysis_summary_path"],
+            protocol_config_path=analysis_protocol_config_path,
+            eval_config_path=eval_config_path,
+            analysis_config_path=analysis_config_path,
+            output_dir=output_root / "report_theory",
+        )
+        companion_outputs["theory"] = {
+            "analysis": theory_inference_outputs,
+            "report": theory_artifact_outputs,
+        }
 
     bundle_path = _write_json(
         {
             "run_id": resolved_run_id,
+            "primary_checkpoint_policy": primary_checkpoint_policy,
             "data_preflight_path": str(data_preflight_path),
             "train": train_outputs,
             "analysis_manifest": analysis_manifest_outputs,
             "analysis": inference_outputs,
             "report": artifact_outputs,
+            "companion_policy_outputs": companion_outputs,
         },
         output_root / "experiment_paths.json",
     )
@@ -1683,6 +2153,8 @@ def write_plan_a_experiment_bundle(
         "train_summary_path": train_outputs["summary_path"],
         "validation_manifest_path": train_outputs["validation_manifest_path"],
         "best_checkpoint_path": train_outputs["best_checkpoint_path"],
+        "best_balanced_checkpoint_path": train_outputs["best_balanced_checkpoint_path"],
+        "checkpoint_selection_summary_path": train_outputs["checkpoint_selection_summary_path"],
         "analysis_manifest_path": analysis_manifest_outputs["manifest_path"],
         "analysis_path": inference_outputs["analysis_path"],
         "analysis_summary_path": inference_outputs["analysis_summary_path"],

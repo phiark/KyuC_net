@@ -17,6 +17,7 @@ def _format_string_list(values: Iterable[str]) -> str:
 
 def write_experiment_record(
     output_path: str | Path,
+    model_family: str,
     run_id: str,
     protocol_id: str,
     config_snapshot_paths: dict[str, str],
@@ -27,21 +28,29 @@ def write_experiment_record(
     matched_summary: MatchedBenchmarkSummary,
     *,
     checkpoint_path: str | None = None,
+    checkpoint_selection_summary_path: str | None = None,
+    balanced_vs_theory_checkpoint_table_path: str | None = None,
     analysis_summary_path: str | None = None,
     sidecar_resolution_mode: str | None = None,
     integrity_overrides: Iterable[str] = (),
     source_run_ids: Iterable[str] = (),
     source_protocol_ids: Iterable[str] = (),
     resolved_eval_config: Mapping[str, str | int | float] | None = None,
+    proposition_diagnostic_scalar_name: str | None = None,
+    proposition_diagnostic_table_path: str | None = None,
+    proposition_tau_roc_curve_path: str | None = None,
 ) -> Path:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"# Experiment Record: {run_id}",
         "",
+        f"- model_family: `{model_family}`",
         f"- run_id: `{run_id}`",
         f"- protocol_id: `{protocol_id}`",
         f"- checkpoint_path: `{_format_optional_path(checkpoint_path)}`",
+        f"- checkpoint_selection_summary_path: `{_format_optional_path(checkpoint_selection_summary_path)}`",
+        f"- balanced_vs_theory_checkpoint_table_path: `{_format_optional_path(balanced_vs_theory_checkpoint_table_path)}`",
         f"- analysis_summary_path: `{_format_optional_path(analysis_summary_path)}`",
         f"- sidecar_resolution_mode: `{_format_optional_path(sidecar_resolution_mode)}`",
         f"- integrity_overrides: `{_format_string_list(integrity_overrides)}`",
@@ -73,12 +82,20 @@ def write_experiment_record(
             f"- pair_name: `{matched_summary.pair_name}`",
             f"- weighted_pair_name: `{matched_summary.weighted_pair_name}`",
             f"- scalar_name: `{matched_summary.scalar_name}`",
-            f"- tau_scalar_name: `{matched_summary.tau_scalar_name}`",
             f"- test_size: `{matched_summary.test_size}`",
             f"- random_state: `{matched_summary.random_state}`",
-            f"- tau_scalar_auroc: `{matched_summary.tau_scalar_auroc:.6f}`",
             f"- completion_scan_scalar_names: `{_format_string_list(matched_summary.completion_scan_scalar_names)}`",
             f"- completion_scan_aurocs: `{_format_string_list(f'{value:.6f}' for value in matched_summary.completion_scan_aurocs)}`",
+            "",
+        ]
+    )
+    lines.extend(
+        [
+            "## Proposition Diagnostics",
+            "",
+            f"- tau_scalar_name: `{_format_optional_path(proposition_diagnostic_scalar_name)}`",
+            f"- proposition_diagnostic_table_path: `{_format_optional_path(proposition_diagnostic_table_path)}`",
+            f"- proposition_tau_roc_curve_path: `{_format_optional_path(proposition_tau_roc_curve_path)}`",
             "",
         ]
     )

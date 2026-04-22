@@ -19,6 +19,7 @@ from frcnet.evaluation.matched_benchmark import (
 )
 from frcnet.evaluation.records import (
     AnalysisExportSummary,
+    DEFAULT_MODEL_FAMILY,
     SampleAnalysisRecord,
     Top1PropositionRecord,
     read_analysis_export_summary,
@@ -31,6 +32,7 @@ from frcnet.evaluation.records import (
 
 __all__ = [
     "AnalysisExportSummary",
+    "DEFAULT_MODEL_FAMILY",
     "DEFAULT_COMPLETION_SCAN_SCALARS",
     "DEFAULT_WEIGHTED_PAIR_NAME",
     "MatchedBenchmarkSummary",

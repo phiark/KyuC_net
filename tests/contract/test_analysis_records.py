@@ -33,12 +33,16 @@ def test_sample_analysis_records_expose_paper_fields():
     assert hasattr(first_record, "resolution_ratio")
     assert hasattr(first_record, "content_entropy")
     assert hasattr(first_record, "resolution_weighted_content_entropy")
+    assert hasattr(first_record, "proposition_truth_ratio")
+    assert hasattr(first_record, "resolution_entropy")
+    assert hasattr(first_record, "ternary_entropy")
+    assert hasattr(first_record, "auxiliary_top1_content_probability")
     assert hasattr(first_record, "completion_score_beta_0_1")
     assert hasattr(first_record, "completion_score_beta_0_25")
     assert hasattr(first_record, "completion_score_beta_0_75")
 
 
-def test_top1_proposition_records_filter_out_ood_and_unknown():
+def test_top1_proposition_records_cover_all_cohorts_and_preserve_proposition_masses():
     batch_input = build_synthetic_batch()
     model = FRCNetModel(num_classes=10)
     model_output = model(batch_input.image)
@@ -46,9 +50,17 @@ def test_top1_proposition_records_filter_out_ood_and_unknown():
 
     proposition_records = build_top1_proposition_records(sample_records)
 
-    assert len(proposition_records) == 3
+    assert len(proposition_records) == batch_input.batch_size
     ambiguous_record = next(record for record in proposition_records if record.cohort_name == "ambiguous_id")
     assert ambiguous_record.proposition_target_type == "candidate_set"
+    unknown_record = next(record for record in proposition_records if record.cohort_name == "unknown_supervision")
+    assert unknown_record.proposition_target_type == "empty_set"
+    for record in proposition_records:
+        total_mass = (
+            record.proposition_truth_mass + record.proposition_false_mass + record.proposition_unknown_mass
+        )
+        assert total_mass == pytest.approx(1.0, abs=1e-5)
+        assert 0.0 <= record.proposition_truth_ratio <= 1.0
 
 
 def test_analysis_export_summary_round_trip(tmp_path: Path):

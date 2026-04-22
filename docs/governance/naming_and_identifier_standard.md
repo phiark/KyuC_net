@@ -3,7 +3,7 @@
 - document_id: gov_naming_identifier_standard
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-22
 - standard_alignment: iso_8601, iso_iec_11179_inspired
 
 ## 1. 目标
@@ -53,11 +53,12 @@
 | `p_k` | class mass | `class_mass` | `resolution_ratio * content_distribution` |
 | `u` | unknown mass | `unknown_mass` | `1 - resolution_ratio` |
 | `p_top1` | top-1 class mass | `top1_class_mass` | top-1 的 `class_mass` |
-| `tau` / `τ` | top-1 content probability | `top1_content_probability` | 在 top-1 correctness 命题下是导出量 |
+| `tau` / `τ` | proposition truth ratio | `proposition_truth_ratio` | 规范口径是命题层 `p_T / (p_T + p_F)` |
 | `H_cont` | content entropy | `content_entropy` | 对 `content_distribution` 求熵 |
 | `r H_cont` | resolution-weighted content entropy | `resolution_weighted_content_entropy` | 对 `resolution_ratio * content_entropy` 的显式导出 |
 | `H_res` | resolution entropy | `resolution_entropy` | 对 `resolution_ratio` 的二元熵 |
 | `H_3` | ternary entropy | `ternary_entropy` | 对显式状态求熵 |
+| auxiliary `tau` surrogate | top-1 content probability | `auxiliary_top1_content_probability` | 保留为辅助诊断量, 不再作为规范 `tau` |
 | `beta` / `β` | completion policy parameter | `completion_policy_beta` | 下游读出策略参数 |
 | `q_beta` | completion score | `completion_score` | 标量读出 |
 | `S` | candidate class set | `candidate_class_set` | 歧义监督候选类集合 |
@@ -105,6 +106,7 @@
 ## 6. 禁止项
 
 - 不把 `unknown_mass` 命名为 `uncertainty`, 因为含义过宽
-- 不把 `content_distribution` 命名为 `tau`, 因为 `tau` 只是特定命题下的导出量
+- 不把 `content_distribution` 或 `auxiliary_top1_content_probability` 命名为 `tau`, 因为规范 `tau` 是命题级 `proposition_truth_ratio`
+- 不把 `proposition_truth_ratio` 放回主 matched benchmark 里充当公平 scalar baseline, 它属于 proposition diagnostics
 - 不把 `completion_score` 当作模型唯一主输出
 - 不在不同文件中混用 `vacuity`, `unknown_mass`, `unresolved_mass` 指向同一对象而不声明

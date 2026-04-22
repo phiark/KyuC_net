@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import torch
 
@@ -24,8 +26,45 @@ def test_compute_total_loss_routes_all_training_cohorts():
     assert loss_breakdown.loss_total.requires_grad
     assert torch.isfinite(loss_breakdown.loss_id)
     assert torch.isfinite(loss_breakdown.loss_unknown)
+    assert torch.isfinite(loss_breakdown.loss_unknown_content)
     assert torch.isfinite(loss_breakdown.loss_ambiguous)
+    assert torch.isfinite(loss_breakdown.loss_hard_resolution_floor)
+    assert torch.isfinite(loss_breakdown.loss_hard_entropy_ceiling)
+    assert torch.isfinite(loss_breakdown.loss_ambiguous_entropy_floor)
     assert torch.isfinite(loss_breakdown.loss_total)
+
+
+def test_compute_total_loss_unknown_content_regularizer_penalizes_peaked_unknown_content():
+    batch_input = build_synthetic_batch()
+    model = FRCNetModel(num_classes=10)
+    model_output = model(batch_input.image)
+
+    peaked_distribution = model_output.content_distribution.clone()
+    peaked_distribution[3] = torch.tensor(
+        [0.97] + [0.0033333334] * 9,
+        dtype=peaked_distribution.dtype,
+    )
+    uniform_distribution = model_output.content_distribution.clone()
+    uniform_distribution[3] = torch.full(
+        (10,),
+        0.1,
+        dtype=uniform_distribution.dtype,
+    )
+    peaked_output = replace(model_output, content_distribution=peaked_distribution)
+    uniform_output = replace(model_output, content_distribution=uniform_distribution)
+
+    peaked_loss = compute_total_loss(
+        peaked_output,
+        batch_input,
+        {"unknown_content_entropy_weight": 1.0},
+    )
+    uniform_loss = compute_total_loss(
+        uniform_output,
+        batch_input,
+        {"unknown_content_entropy_weight": 1.0},
+    )
+
+    assert peaked_loss.loss_unknown_content > uniform_loss.loss_unknown_content
 
 
 def test_run_train_step_cpu_smoke():
@@ -38,6 +77,99 @@ def test_run_train_step_cpu_smoke():
 
     assert torch.isfinite(loss_breakdown.loss_total)
     assert loss_breakdown.optimizer_step_performed is True
+
+
+def test_compute_total_loss_hard_resolution_floor_penalizes_low_resolution_hard_id():
+    batch_input = build_synthetic_batch()
+    model = FRCNetModel(num_classes=10)
+    model_output = model(batch_input.image)
+
+    low_resolution = model_output.resolution_ratio.clone()
+    high_resolution = model_output.resolution_ratio.clone()
+    hard_index = batch_input.cohort_name.index("hard_id")
+    low_resolution[hard_index] = 0.35
+    high_resolution[hard_index] = 0.92
+
+    low_output = replace(model_output, resolution_ratio=low_resolution, unknown_mass=1.0 - low_resolution)
+    high_output = replace(model_output, resolution_ratio=high_resolution, unknown_mass=1.0 - high_resolution)
+
+    low_loss = compute_total_loss(
+        low_output,
+        batch_input,
+        {"hard_id_resolution_floor": 0.8, "hard_id_resolution_weight": 1.0},
+    )
+    high_loss = compute_total_loss(
+        high_output,
+        batch_input,
+        {"hard_id_resolution_floor": 0.8, "hard_id_resolution_weight": 1.0},
+    )
+
+    assert low_loss.loss_hard_resolution_floor > high_loss.loss_hard_resolution_floor
+
+
+def test_compute_total_loss_hard_entropy_ceiling_penalizes_high_entropy_hard_id():
+    batch_input = build_synthetic_batch()
+    model = FRCNetModel(num_classes=10)
+    model_output = model(batch_input.image)
+    hard_index = batch_input.cohort_name.index("hard_id")
+
+    high_entropy_distribution = model_output.content_distribution.clone()
+    high_entropy_distribution[hard_index] = torch.full((10,), 0.1, dtype=high_entropy_distribution.dtype)
+    low_entropy_distribution = model_output.content_distribution.clone()
+    low_entropy_distribution[hard_index] = torch.tensor(
+        [0.97] + [0.0033333334] * 9,
+        dtype=low_entropy_distribution.dtype,
+    )
+
+    high_entropy_output = replace(model_output, content_distribution=high_entropy_distribution)
+    low_entropy_output = replace(model_output, content_distribution=low_entropy_distribution)
+
+    high_entropy_loss = compute_total_loss(
+        high_entropy_output,
+        batch_input,
+        {"hard_id_entropy_ceiling": 1.2, "hard_id_entropy_weight": 1.0},
+    )
+    low_entropy_loss = compute_total_loss(
+        low_entropy_output,
+        batch_input,
+        {"hard_id_entropy_ceiling": 1.2, "hard_id_entropy_weight": 1.0},
+    )
+
+    assert high_entropy_loss.loss_hard_entropy_ceiling > low_entropy_loss.loss_hard_entropy_ceiling
+
+
+def test_compute_total_loss_ambiguous_entropy_floor_penalizes_overconfident_ambiguous_content():
+    batch_input = build_synthetic_batch()
+    model = FRCNetModel(num_classes=10)
+    model_output = model(batch_input.image)
+    ambiguous_index = batch_input.cohort_name.index("ambiguous_id")
+
+    low_entropy_distribution = model_output.content_distribution.clone()
+    low_entropy_distribution[ambiguous_index] = torch.tensor(
+        [0.97] + [0.0033333334] * 9,
+        dtype=low_entropy_distribution.dtype,
+    )
+    higher_entropy_distribution = model_output.content_distribution.clone()
+    higher_entropy_distribution[ambiguous_index] = torch.tensor(
+        [0.5, 0.5] + [0.0] * 8,
+        dtype=higher_entropy_distribution.dtype,
+    )
+
+    low_entropy_output = replace(model_output, content_distribution=low_entropy_distribution)
+    higher_entropy_output = replace(model_output, content_distribution=higher_entropy_distribution)
+
+    low_entropy_loss = compute_total_loss(
+        low_entropy_output,
+        batch_input,
+        {"ambiguous_entropy_floor_margin": 0.1, "ambiguous_entropy_floor_weight": 1.0},
+    )
+    higher_entropy_loss = compute_total_loss(
+        higher_entropy_output,
+        batch_input,
+        {"ambiguous_entropy_floor_margin": 0.1, "ambiguous_entropy_floor_weight": 1.0},
+    )
+
+    assert low_entropy_loss.loss_ambiguous_entropy_floor > higher_entropy_loss.loss_ambiguous_entropy_floor
 
 
 def test_run_train_step_skips_ood_only_batch():

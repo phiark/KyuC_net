@@ -1,0 +1,16 @@
+eval:
+  benchmark_name: plan_a_v0_3debug_r2_matched_ambiguous_vs_ood
+  positive_cohort: ambiguous_id
+  negative_cohort: ood
+  primary_pair: resolution_ratio__content_entropy
+  weighted_pair: resolution_ratio__resolution_weighted_content_entropy
+  primary_scalar: completion_score_beta_0_1
+  tau_scalar_name: proposition_truth_ratio
+  completion_scan_scalars:
+    - completion_score_beta_0_1
+    - completion_score_beta_0_25
+    - completion_score_beta_0_5
+    - completion_score_beta_0_75
+  emit_proposition_diagnostics: true
+  test_size: 0.3
+  random_state: 7

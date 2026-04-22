@@ -1,0 +1,102 @@
+train:
+  output_root: artifacts/studies
+  model_family: frcnet_explicit_unknown
+
+  training:
+    seed: 7
+    phases:
+      - name: warmup
+        epoch_count: 5
+        enabled_cohorts: [easy_id, unknown_supervision]
+        lr_scale: 1.0
+        loss_overrides:
+          unknown_content_entropy_weight: 0.5
+      - name: main
+        epoch_count: 25
+        enabled_cohorts: [easy_id, hard_id, ambiguous_id, unknown_supervision]
+        lr_scale: 1.0
+        loss_overrides:
+          hard_id_label_smoothing: 0.1
+          unknown_content_entropy_weight: 0.25
+          weight_ambiguous: 1.1
+          hard_id_resolution_floor: 0.8
+          hard_id_resolution_weight: 0.25
+          hard_id_entropy_ceiling: 1.2
+          hard_id_entropy_weight: 0.1
+          ambiguous_entropy_floor_margin: 0.1
+          ambiguous_entropy_floor_weight: 0.1
+      - name: stabilize
+        epoch_count: 10
+        enabled_cohorts: [easy_id, hard_id, ambiguous_id, unknown_supervision]
+        lr_scale: 0.25
+        loss_overrides:
+          weight_id: 0.65
+          weight_ambiguous: 1.35
+          unknown_content_entropy_weight: 0.5
+          hard_id_label_smoothing: 0.1
+          hard_id_resolution_floor: 0.85
+          hard_id_resolution_weight: 0.3
+          hard_id_entropy_ceiling: 1.1
+          hard_id_entropy_weight: 0.15
+          ambiguous_entropy_floor_margin: 0.05
+          ambiguous_entropy_floor_weight: 0.15
+
+  runtime:
+    backend: auto
+    dtype: float32
+    amp_enabled: false
+    pin_memory: auto
+
+  dataloader:
+    batch_size: 64
+    shuffle: true
+    drop_last: true
+    num_workers: 0
+    persistent_workers: false
+    pin_memory: auto
+
+  optimizer:
+    name: adamw
+    lr: 0.0005
+    weight_decay: 0.0001
+    betas: [0.9, 0.999]
+
+  loss:
+    weight_id: 1.0
+    weight_unknown: 1.0
+    weight_ambiguous: 1.0
+    unknown_content_entropy_weight: 0.0
+    hard_id_label_smoothing: 0.0
+    hard_id_resolution_floor: 0.0
+    hard_id_resolution_weight: 0.0
+    hard_id_entropy_ceiling: 0.0
+    hard_id_entropy_weight: 0.0
+    ambiguous_entropy_floor_margin: 0.0
+    ambiguous_entropy_floor_weight: 0.0
+    ambiguous_resolution_target: 0.8
+    ambiguous_resolution_weight: 1.0
+
+  checkpointing:
+    save_every_epochs: 1
+    primary_policy: balanced
+    selection_policies:
+      theory:
+        checkpoint_name: checkpoint_best_theory.pt
+        eligible_phases: [main, stabilize]
+      balanced:
+        checkpoint_name: checkpoint_best_balanced.pt
+        eligible_phases: [main, stabilize]
+        score_weights:
+          pair_auroc: 1.0
+          easy_id_top1_accuracy: 1.0
+          hard_id_top1_accuracy: 1.0
+          ambiguous_candidate_hit_rate: 1.0
+
+  validation:
+    dataloader:
+      batch_size: 128
+      shuffle: false
+      drop_last: false
+      num_workers: 0
+      persistent_workers: false
+      pin_memory: auto

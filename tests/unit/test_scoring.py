@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-import pytest
 import torch
+import pytest
 
-from frcnet.utils import completion_score, content_entropy, resolution_weighted_content_entropy
+from frcnet.utils import (
+    completion_score,
+    content_entropy,
+    resolution_entropy,
+    resolution_weighted_content_entropy,
+    ternary_entropy_from_masses,
+)
 
 
 def test_content_entropy_returns_expected_shape():
@@ -38,3 +44,23 @@ def test_resolution_weighted_content_entropy_multiplies_inputs():
 
     expected = torch.tensor([0.1, 1.2], dtype=torch.float32)
     torch.testing.assert_close(weighted_entropy, expected)
+
+
+def test_resolution_entropy_returns_binary_entropy():
+    resolution_ratio = torch.tensor([0.5, 1.0], dtype=torch.float32)
+
+    entropy = resolution_entropy(resolution_ratio)
+
+    assert entropy.shape == (2,)
+    assert entropy[0] > entropy[1]
+
+
+def test_ternary_entropy_accepts_truth_false_unknown_masses():
+    truth_mass = torch.tensor([0.2], dtype=torch.float32)
+    false_mass = torch.tensor([0.3], dtype=torch.float32)
+    unknown_mass = torch.tensor([0.5], dtype=torch.float32)
+
+    entropy = ternary_entropy_from_masses(truth_mass, false_mass, unknown_mass)
+
+    assert entropy.shape == (1,)
+    assert torch.isfinite(entropy).all()

@@ -9,6 +9,8 @@
 
 本协议定义 FRCNet `v0.3` 的正式研究口径。该版本继续以原生 Plan A 为主线, 但把交付单位从单次 run 升级为 study 级结果。
 
+`v0.3debug` 的理论对齐修复协议见 `docs/architecture/plan_a_v0_3debug_protocol.md`。
+
 ## 2. 默认主协议
 
 - 训练协议: `configs/protocol/plan_a_v0_3_train.yaml`
@@ -32,7 +34,7 @@
 - 强制次级 pair: `(resolution_ratio, resolution_weighted_content_entropy)`
 - 主 scalar: `completion_score_beta_0_1`
 - 强制附带:
-  - `top1_content_probability`
+  - `top1_content_probability` (`v0.3` 历史口径)
   - `completion_score_beta_0_25`
   - `completion_score_beta_0_5`
   - `completion_score_beta_0_75`
