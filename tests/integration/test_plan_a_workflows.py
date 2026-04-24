@@ -46,6 +46,11 @@ def _fake_source_datasets():
     }
 
 
+def _patch_fake_source_datasets(monkeypatch) -> None:
+    monkeypatch.setattr("frcnet.workflows.plan_a_training.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    monkeypatch.setattr("frcnet.workflows.plan_a_inference.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+
+
 def _build_model_payload() -> dict:
     return {
         "name": "frcnet_resnet18_base",
@@ -75,80 +80,11 @@ def _build_train_payload(tmp_path: Path, *, epochs: int = 1) -> dict:
             "weight_id": 1.0,
             "weight_unknown": 1.0,
             "weight_ambiguous": 1.0,
-            "unknown_content_entropy_weight": 0.25,
-            "hard_id_label_smoothing": 0.1,
-            "hard_id_resolution_floor": 0.0,
-            "hard_id_resolution_weight": 0.0,
-            "hard_id_entropy_ceiling": 0.0,
-            "hard_id_entropy_weight": 0.0,
-            "ambiguous_entropy_floor_margin": 0.0,
-            "ambiguous_entropy_floor_weight": 0.0,
             "ambiguous_resolution_target": 0.8,
             "ambiguous_resolution_weight": 1.0,
         },
-        "checkpointing": {
-            "save_every_epochs": 1,
-            "primary_policy": "balanced",
-            "selection_policies": {
-                "theory": {
-                    "checkpoint_name": "checkpoint_best_theory.pt",
-                    "eligible_phases": ["main"],
-                },
-                "balanced": {
-                    "checkpoint_name": "checkpoint_best_balanced.pt",
-                    "eligible_phases": ["main"],
-                    "score_weights": {
-                        "pair_auroc": 1.0,
-                        "easy_id_top1_accuracy": 1.0,
-                        "hard_id_top1_accuracy": 1.0,
-                        "ambiguous_candidate_hit_rate": 1.0,
-                    },
-                },
-            },
-        },
+        "checkpointing": {"save_every_epochs": 1},
     }
-
-
-def _build_curriculum_train_payload(tmp_path: Path) -> dict:
-    payload = _build_train_payload(tmp_path, epochs=1)
-    payload["training"] = {
-        "seed": 7,
-        "phases": [
-            {
-                "name": "warmup",
-                "epoch_count": 1,
-                "enabled_cohorts": ["easy_id", "unknown_supervision"],
-                "loss_overrides": {"unknown_content_entropy_weight": 0.5},
-            },
-            {
-                "name": "main",
-                "epoch_count": 1,
-                "enabled_cohorts": ["easy_id", "hard_id", "ambiguous_id", "unknown_supervision"],
-                "lr_scale": 0.5,
-                "loss_overrides": {
-                    "hard_id_label_smoothing": 0.2,
-                    "weight_ambiguous": 1.2,
-                    "hard_id_resolution_floor": 0.8,
-                    "hard_id_resolution_weight": 0.2,
-                    "hard_id_entropy_ceiling": 1.2,
-                    "hard_id_entropy_weight": 0.1,
-                    "ambiguous_entropy_floor_margin": 0.1,
-                    "ambiguous_entropy_floor_weight": 0.1,
-                },
-            },
-        ],
-    }
-    payload["validation"] = {
-        "dataloader": {
-            "batch_size": 4,
-            "shuffle": False,
-            "drop_last": False,
-            "num_workers": 0,
-            "persistent_workers": False,
-            "pin_memory": False,
-        }
-    }
-    return payload
 
 
 def _build_eval_payload(*, primary_scalar: str = "top1_completion_beta_0_1", random_state: int = 7) -> dict:
@@ -185,7 +121,6 @@ def _build_analysis_payload() -> dict:
         "proposition_diagnostic_table_name": "proposition.csv",
         "proposition_tau_cohort_boxplot_name": "proposition_tau_boxplot.png",
         "proposition_tau_roc_curve_name": "proposition_tau.png",
-        "balanced_vs_theory_checkpoint_table_name": "balanced_vs_theory.csv",
     }
 
 
@@ -217,7 +152,7 @@ def test_train_plan_a_model_writes_records_and_checkpoints(tmp_path: Path, monke
         _build_train_payload(tmp_path, epochs=2),
     )
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     outputs = train_plan_a_model(
         protocol_config_path=protocol_config_path,
@@ -240,21 +175,21 @@ def test_train_plan_a_model_writes_records_and_checkpoints(tmp_path: Path, monke
     assert len(summary_payload["epochs"]) == 2
 
 
-def test_train_plan_a_model_supports_curriculum_and_validation_selection(tmp_path: Path, monkeypatch):
+def test_train_plan_a_model_uses_validation_for_single_best_checkpoint(tmp_path: Path, monkeypatch):
     train_protocol = _build_protocol("train", cifar_train=True, svhn_split="train")
     validation_protocol = _build_protocol("validation", cifar_train=False, svhn_split="test")
     protocol_config_path = _write_yaml(tmp_path / "protocol_train.yaml", "protocol", train_protocol)
     validation_protocol_path = _write_yaml(tmp_path / "protocol_validation.yaml", "protocol", validation_protocol)
     model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
     train_config_path = _write_yaml(
-        tmp_path / "train_curriculum.yaml",
+        tmp_path / "train.yaml",
         "train",
-        _build_curriculum_train_payload(tmp_path),
+        _build_train_payload(tmp_path, epochs=2),
     )
     eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
     validation_manifest_path = _write_manifest(tmp_path / "validation_manifest.jsonl", validation_protocol)
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     outputs = train_plan_a_model(
         protocol_config_path=protocol_config_path,
@@ -270,16 +205,20 @@ def test_train_plan_a_model_supports_curriculum_and_validation_selection(tmp_pat
     summary_payload = json.loads(Path(outputs["summary_path"]).read_text(encoding="utf-8"))
     phase_names = [epoch_payload["phase_name"] for epoch_payload in summary_payload["epochs"]]
 
-    assert phase_names == ["warmup", "main"]
+    assert phase_names == ["train", "train"]
     assert Path(outputs["validation_history_path"]).exists()
-    assert summary_payload["validation"]["checkpoint_selection"] == "validation_policy_specific"
-    assert summary_payload["checkpoints"]["best_policy"] == "balanced"
-    assert summary_payload["checkpoints"]["best_epoch"] == 2
-    assert summary_payload["checkpoints"]["best_theory_epoch"] == 2
-    assert Path(outputs["best_balanced_checkpoint_path"]).exists()
-    assert Path(outputs["best_theory_checkpoint_path"]).exists()
+    assert summary_payload["validation"]["checkpoint_selection"] == (
+        "validation_pair_auroc_then_easy_id_top1_then_train_mean_loss"
+    )
+    assert "best_theory" not in summary_payload["checkpoints"]
+    assert "best_balanced" not in summary_payload["checkpoints"]
+    assert Path(outputs["best_checkpoint_path"]).name == "checkpoint_best.pt"
+    assert not (Path(outputs["best_checkpoint_path"]).parent / "checkpoint_best_theory.pt").exists()
+    assert not (Path(outputs["best_checkpoint_path"]).parent / "checkpoint_best_balanced.pt").exists()
     assert Path(outputs["checkpoint_selection_summary_path"]).exists()
     assert summary_payload["checkpoints"]["selection_summary_path"] == outputs["checkpoint_selection_summary_path"]
+    selection_payload = json.loads(Path(outputs["checkpoint_selection_summary_path"]).read_text(encoding="utf-8"))
+    assert set(selection_payload) == {"best", "last", "model_family"}
 
 
 def test_train_plan_a_model_emits_batch_progress_messages(tmp_path: Path, monkeypatch):
@@ -295,14 +234,14 @@ def test_train_plan_a_model_emits_batch_progress_messages(tmp_path: Path, monkey
     )
     model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
     train_config_path = _write_yaml(
-        tmp_path / "train_curriculum.yaml",
+        tmp_path / "train.yaml",
         "train",
-        _build_curriculum_train_payload(tmp_path),
+        _build_train_payload(tmp_path, epochs=1),
     )
     eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
     validation_manifest_path = _write_manifest(tmp_path / "validation_manifest.jsonl", _build_protocol("validation", cifar_train=False, svhn_split="test"))
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     progress_messages: list[str] = []
     train_plan_a_model(
@@ -353,7 +292,7 @@ def test_write_plan_a_experiment_bundle_creates_end_to_end_outputs(tmp_path: Pat
         _build_analysis_payload(),
     )
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     outputs = write_plan_a_experiment_bundle(
         train_protocol_config_path=train_protocol_config_path,
@@ -377,8 +316,8 @@ def test_write_plan_a_experiment_bundle_creates_end_to_end_outputs(tmp_path: Pat
     assert Path(outputs["validation_manifest_path"]).exists()
     assert Path(outputs["checkpoint_selection_summary_path"]).exists()
     bundle_payload = json.loads(Path(outputs["bundle_path"]).read_text(encoding="utf-8"))
-    assert bundle_payload["primary_checkpoint_policy"] == "balanced"
-    assert Path(bundle_payload["companion_policy_outputs"]["theory"]["report"]["experiment_record_path"]).exists()
+    assert "primary_checkpoint_policy" not in bundle_payload
+    assert "companion_policy_outputs" not in bundle_payload
 
 
 def test_train_plan_a_model_rejects_duplicate_manifest_sample_ids(tmp_path: Path, monkeypatch):
@@ -391,7 +330,7 @@ def test_train_plan_a_model_rejects_duplicate_manifest_sample_ids(tmp_path: Path
     manifest_lines[1] = manifest_lines[0]
     manifest_path.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     with pytest.raises(ValueError, match="unique sample_id"):
         train_plan_a_model(
@@ -409,7 +348,7 @@ def test_export_plan_a_inference_requires_checkpoint_by_default(tmp_path: Path, 
     model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
     manifest_path = _write_manifest(tmp_path / "manifest.jsonl", protocol)
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     with pytest.raises(ValueError, match="checkpoint_path"):
         export_plan_a_inference_bundle(
@@ -427,7 +366,7 @@ def test_export_plan_a_inference_allows_missing_checkpoint_with_summary(tmp_path
     model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
     manifest_path = _write_manifest(tmp_path / "manifest.jsonl", protocol)
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     outputs = export_plan_a_inference_bundle(
         protocol_config_path=protocol_config_path,
@@ -452,7 +391,7 @@ def test_generate_plan_a_artifact_bundle_uses_analysis_summary_explicit(tmp_path
     manifest_path = _write_manifest(tmp_path / "manifest.jsonl", protocol)
     checkpoint_path = _write_checkpoint(tmp_path / "checkpoint_best.pt")
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     inference_outputs = export_plan_a_inference_bundle(
         protocol_config_path=protocol_config_path,
@@ -493,7 +432,7 @@ def test_generate_plan_a_artifact_bundle_accepts_repo_relative_analysis_summary_
     manifest_path = _write_manifest(tmp_path / "manifest.jsonl", protocol)
     checkpoint_path = _write_checkpoint(tmp_path / "checkpoint_best.pt")
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
     inference_outputs = export_plan_a_inference_bundle(
@@ -525,7 +464,7 @@ def test_generate_plan_a_artifact_bundle_auto_and_legacy_modes(tmp_path: Path, m
     manifest_path = _write_manifest(tmp_path / "manifest.jsonl", protocol)
     checkpoint_path = _write_checkpoint(tmp_path / "checkpoint_best.pt")
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     inference_outputs = export_plan_a_inference_bundle(
         protocol_config_path=protocol_config_path,
@@ -564,7 +503,7 @@ def test_generate_plan_a_artifact_bundle_rejects_mixed_runs_by_default_and_marks
     manifest_path = _write_manifest(tmp_path / "manifest.jsonl", protocol)
     checkpoint_path = _write_checkpoint(tmp_path / "checkpoint_best.pt")
 
-    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+    _patch_fake_source_datasets(monkeypatch)
 
     inference_outputs = export_plan_a_inference_bundle(
         protocol_config_path=protocol_config_path,

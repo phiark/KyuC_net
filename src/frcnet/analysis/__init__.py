@@ -8,9 +8,9 @@ from frcnet.analysis.artifacts import (
     write_cohort_summary_table,
     write_geometry_hexbin,
     write_geometry_scatter,
+    write_proposition_tau_cohort_boxplot,
     write_proposition_diagnostic_table,
     write_scalar_roc_curve,
-    write_tau_cohort_boxplot,
 )
 from frcnet.analysis.reporting import write_experiment_record
 
@@ -23,7 +23,7 @@ __all__ = [
     "write_experiment_record",
     "write_geometry_hexbin",
     "write_geometry_scatter",
+    "write_proposition_tau_cohort_boxplot",
     "write_proposition_diagnostic_table",
     "write_scalar_roc_curve",
-    "write_tau_cohort_boxplot",
 ]

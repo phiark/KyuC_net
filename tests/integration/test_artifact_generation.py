@@ -11,8 +11,8 @@ from frcnet.analysis import (
     write_experiment_record,
     write_geometry_hexbin,
     write_geometry_scatter,
+    write_proposition_tau_cohort_boxplot,
     write_scalar_roc_curve,
-    write_tau_cohort_boxplot,
 )
 from frcnet.analysis.artifacts import _build_cohort_occupancy_histograms
 from frcnet.evaluation import summarize_matched_ambiguous_vs_ood, write_matched_benchmark_summary
@@ -43,10 +43,10 @@ def test_artifact_writers_create_expected_files(tmp_path: Path):
     hexbin_path = write_geometry_hexbin(sample_records, tmp_path / "geometry_hexbin.png")
     occupancy_path = write_cohort_occupancy(sample_records, tmp_path / "cohort_occupancy.png")
     cohort_counts_path = write_cohort_counts(sample_records, tmp_path / "cohort_counts.png")
-    tau_path = write_tau_cohort_boxplot(sample_records, tmp_path / "tau_cohort_boxplot.png")
+    tau_path = write_proposition_tau_cohort_boxplot(sample_records, tmp_path / "proposition_tau_cohort_boxplot.png")
     tau_roc_path = write_scalar_roc_curve(
         sample_records,
-        tmp_path / "tau_roc_curve.png",
+        tmp_path / "proposition_tau_roc_curve.png",
         positive_cohort="ambiguous_id",
         negative_cohort="ood",
         scalar_name="proposition_truth_ratio",
@@ -64,7 +64,7 @@ def test_artifact_writers_create_expected_files(tmp_path: Path):
     assert summary_path.exists()
     assert "mean_proposition_truth_ratio" in summary_path.read_text(encoding="utf-8")
     assert "mean_auxiliary_top1_content_probability" in summary_path.read_text(encoding="utf-8")
-    assert "mean_resolution_weighted_content_entropy" in summary_path.read_text(encoding="utf-8")
+    assert "mean_state_weighted_content_entropy" in summary_path.read_text(encoding="utf-8")
 
 
 def test_matched_summary_and_experiment_record(tmp_path: Path):
@@ -104,7 +104,7 @@ def test_matched_summary_and_experiment_record(tmp_path: Path):
         resolved_eval_config={"primary_scalar": "top1_completion_beta_0_1", "random_state": 7},
         proposition_diagnostic_scalar_name="proposition_truth_ratio",
         proposition_diagnostic_table_path=str(tmp_path / "proposition.csv"),
-        proposition_tau_roc_curve_path=str(tmp_path / "tau_roc_curve.png"),
+        proposition_tau_roc_curve_path=str(tmp_path / "proposition_tau_roc_curve.png"),
     )
     record_text = experiment_record_path.read_text(encoding="utf-8")
     matched_text = matched_path.read_text(encoding="utf-8")
@@ -132,10 +132,10 @@ def test_cohort_occupancy_histograms_depend_on_geometry_not_only_counts():
         if record.cohort_name == "hard_id":
             if hard_index % 2 == 0:
                 record.resolution_ratio = 0.1
-                record.content_entropy = 2.8
+                record.state_content_entropy = 2.8
             else:
                 record.resolution_ratio = 0.95
-                record.content_entropy = 0.15
+                record.state_content_entropy = 0.15
             hard_index += 1
     histograms_b, _, _ = _build_cohort_occupancy_histograms(shifted_records)
 

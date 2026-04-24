@@ -11,8 +11,10 @@ from frcnet.evaluation import (
     AnalysisExportSummary,
     build_top1_proposition_records,
     read_analysis_export_summary,
+    read_sample_analysis_records,
     summarize_matched_ambiguous_vs_ood,
     write_analysis_export_summary,
+    write_sample_analysis_records,
 )
 from frcnet.models import FRCNetModel
 from frcnet.evaluation.inference import build_sample_analysis_records
@@ -50,6 +52,45 @@ def test_sample_analysis_records_expose_paper_fields():
     assert hasattr(first_record, "completion_score_beta_0_1")
     assert hasattr(first_record, "completion_score_beta_0_25")
     assert hasattr(first_record, "completion_score_beta_0_75")
+
+
+def test_sample_analysis_csv_outputs_current_schema_and_reads_legacy_aliases(tmp_path: Path):
+    batch_input = build_synthetic_batch()
+    model = FRCNetModel(num_classes=10)
+    model_output = model(batch_input.image)
+    records = build_sample_analysis_records(
+        model_output,
+        batch_input,
+        run_id="RUN-1",
+        protocol_id="plan_a_next_v0_1_analysis",
+    )
+
+    csv_path = write_sample_analysis_records(records, tmp_path / "analysis.csv")
+    header = csv_path.read_text(encoding="utf-8").splitlines()[0].split(",")
+
+    assert "state_content_entropy" in header
+    assert "state_weighted_content_entropy" in header
+    assert "top1_completion_beta_0_1" in header
+    assert "content_entropy" not in header
+    assert "resolution_weighted_content_entropy" not in header
+    assert "completion_score_beta_0_1" not in header
+
+    legacy_row = records[0].to_csv_row()
+    legacy_row["content_entropy"] = legacy_row.pop("state_content_entropy")
+    legacy_row["resolution_weighted_content_entropy"] = legacy_row.pop("state_weighted_content_entropy")
+    legacy_row["completion_score_beta_0_1"] = legacy_row.pop("top1_completion_beta_0_1")
+    legacy_path = tmp_path / "legacy_analysis.csv"
+    legacy_path.write_text(
+        ",".join(legacy_row.keys()) + "\n" + ",".join(str(value) for value in legacy_row.values()) + "\n",
+        encoding="utf-8",
+    )
+    restored = read_sample_analysis_records(legacy_path)
+
+    assert restored[0].state_content_entropy == pytest.approx(float(legacy_row["content_entropy"]))
+    assert restored[0].state_weighted_content_entropy == pytest.approx(
+        float(legacy_row["resolution_weighted_content_entropy"])
+    )
+    assert restored[0].top1_completion_beta_0_1 == pytest.approx(float(legacy_row["completion_score_beta_0_1"]))
 
 
 def test_top1_proposition_records_cover_all_cohorts_and_preserve_proposition_masses():
@@ -113,6 +154,12 @@ def test_matched_summary_rejects_invalid_scalar_name():
 
     with pytest.raises(ValueError, match="Unsupported primary_scalar"):
         summarize_matched_ambiguous_vs_ood(duplicated_records, primary_scalar="predicted_class_index")
+
+    with pytest.raises(ValueError, match="Unsupported primary_scalar"):
+        summarize_matched_ambiguous_vs_ood(duplicated_records, primary_scalar="completion_score_beta_0_1")
+
+    with pytest.raises(ValueError, match="Unsupported primary_pair"):
+        summarize_matched_ambiguous_vs_ood(duplicated_records, primary_pair="resolution_ratio__content_entropy")
 
 
 def test_matched_summary_rejects_label_aware_primary_scalar():

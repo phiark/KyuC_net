@@ -158,7 +158,11 @@ def write_cohort_counts(records: list[SampleAnalysisRecord], output_path: str | 
     return output
 
 
-def write_tau_cohort_boxplot(records: list[SampleAnalysisRecord], output_path: str | Path, dpi: int = 200) -> Path:
+def write_proposition_tau_cohort_boxplot(
+    records: list[SampleAnalysisRecord],
+    output_path: str | Path,
+    dpi: int = 200,
+) -> Path:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     labels = list(sorted({record.cohort_name for record in records}))
@@ -244,8 +248,6 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
             "mean_state_content_entropy",
             "mean_state_weighted_content_entropy",
             "mean_state_entropy",
-            "mean_content_entropy",
-            "mean_resolution_weighted_content_entropy",
             "mean_resolution_entropy",
             "mean_proposition_truth_mass",
             "mean_proposition_false_mass",
@@ -253,10 +255,10 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
             "mean_proposition_truth_ratio",
             "mean_ternary_entropy",
             "mean_auxiliary_top1_content_probability",
-            "mean_completion_score_beta_0_1",
-            "mean_completion_score_beta_0_25",
-            "mean_completion_score_beta_0_5",
-            "mean_completion_score_beta_0_75",
+            "mean_top1_completion_beta_0_1",
+            "mean_top1_completion_beta_0_25",
+            "mean_top1_completion_beta_0_5",
+            "mean_top1_completion_beta_0_75",
         ]
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -273,10 +275,6 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
                         record.state_weighted_content_entropy for record in cohort_records
                     ),
                     "mean_state_entropy": mean(record.state_entropy for record in cohort_records),
-                    "mean_content_entropy": mean(record.content_entropy for record in cohort_records),
-                    "mean_resolution_weighted_content_entropy": mean(
-                        record.resolution_weighted_content_entropy for record in cohort_records
-                    ),
                     "mean_resolution_entropy": mean(record.resolution_entropy for record in cohort_records),
                     "mean_proposition_truth_mass": mean(record.proposition_truth_mass for record in cohort_records),
                     "mean_proposition_false_mass": mean(record.proposition_false_mass for record in cohort_records),
@@ -286,17 +284,17 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
                     "mean_auxiliary_top1_content_probability": mean(
                         record.auxiliary_top1_content_probability for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_1": mean(
-                        record.completion_score_beta_0_1 for record in cohort_records
+                    "mean_top1_completion_beta_0_1": mean(
+                        record.top1_completion_beta_0_1 for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_25": mean(
-                        record.completion_score_beta_0_25 for record in cohort_records
+                    "mean_top1_completion_beta_0_25": mean(
+                        record.top1_completion_beta_0_25 for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_5": mean(
-                        record.completion_score_beta_0_5 for record in cohort_records
+                    "mean_top1_completion_beta_0_5": mean(
+                        record.top1_completion_beta_0_5 for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_75": mean(
-                        record.completion_score_beta_0_75 for record in cohort_records
+                    "mean_top1_completion_beta_0_75": mean(
+                        record.top1_completion_beta_0_75 for record in cohort_records
                     ),
                 }
             )

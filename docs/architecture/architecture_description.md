@@ -53,7 +53,7 @@ completion layer:
 
 - study-level multi-seed runner
 - aggregate report builder
-- theory-vs-balanced dual study comparison
+- dual checkpoint policy comparison
 - decision benchmark runner
 
 ## 5. 架构约束

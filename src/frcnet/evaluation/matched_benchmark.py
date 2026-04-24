@@ -17,9 +17,7 @@ from frcnet.evaluation.scalar_baselines import summarize_fair_scalar
 
 SUPPORTED_PAIR_FEATURES = frozenset(
     {
-        "resolution_ratio__content_entropy",
         "resolution_ratio__state_content_entropy",
-        "resolution_ratio__resolution_weighted_content_entropy",
         "resolution_ratio__state_weighted_content_entropy",
     }
 )
@@ -27,9 +25,7 @@ LABEL_FREE_SCALAR_FEATURES = frozenset(
     {
         "resolution_ratio",
         "unknown_mass",
-        "content_entropy",
         "state_content_entropy",
-        "resolution_weighted_content_entropy",
         "state_weighted_content_entropy",
         "state_entropy",
         "resolution_entropy",
@@ -39,15 +35,10 @@ LABEL_FREE_SCALAR_FEATURES = frozenset(
         "top1_view_unknown_mass",
         "top1_view_tau",
         "auxiliary_top1_content_probability",
-        "top1_content_probability",
         "top1_completion_beta_0_1",
         "top1_completion_beta_0_25",
         "top1_completion_beta_0_5",
         "top1_completion_beta_0_75",
-        "completion_score_beta_0_1",
-        "completion_score_beta_0_25",
-        "completion_score_beta_0_5",
-        "completion_score_beta_0_75",
     }
 )
 LABEL_AWARE_DIAGNOSTIC_SCALAR_FEATURES = frozenset(
@@ -60,15 +51,7 @@ LABEL_AWARE_DIAGNOSTIC_SCALAR_FEATURES = frozenset(
     }
 )
 SUPPORTED_SCALAR_FEATURES = LABEL_FREE_SCALAR_FEATURES | LABEL_AWARE_DIAGNOSTIC_SCALAR_FEATURES
-SCALAR_NAME_ALIASES = {
-    "top1_content_probability": "auxiliary_top1_content_probability",
-    "state_content_entropy": "content_entropy",
-    "state_weighted_content_entropy": "resolution_weighted_content_entropy",
-    "top1_completion_beta_0_1": "completion_score_beta_0_1",
-    "top1_completion_beta_0_25": "completion_score_beta_0_25",
-    "top1_completion_beta_0_5": "completion_score_beta_0_5",
-    "top1_completion_beta_0_75": "completion_score_beta_0_75",
-}
+SCALAR_NAME_ALIASES: dict[str, str] = {}
 DEFAULT_TAU_SCALAR_NAME = "proposition_truth_ratio"
 DEFAULT_PAIR_NAME = "resolution_ratio__state_content_entropy"
 DEFAULT_WEIGHTED_PAIR_NAME = "resolution_ratio__state_weighted_content_entropy"
@@ -172,16 +155,9 @@ class MatchedBenchmarkSummary:
 
 
 def _build_pair_features(records: list[SampleAnalysisRecord], pair_name: str) -> np.ndarray:
-    if pair_name == "resolution_ratio__content_entropy":
-        return np.array([[record.resolution_ratio, record.content_entropy] for record in records], dtype=np.float64)
     if pair_name == "resolution_ratio__state_content_entropy":
         return np.array(
             [[record.resolution_ratio, record.state_content_entropy] for record in records],
-            dtype=np.float64,
-        )
-    if pair_name == "resolution_ratio__resolution_weighted_content_entropy":
-        return np.array(
-            [[record.resolution_ratio, record.resolution_weighted_content_entropy] for record in records],
             dtype=np.float64,
         )
     if pair_name == DEFAULT_WEIGHTED_PAIR_NAME:

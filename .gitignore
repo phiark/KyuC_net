@@ -12,11 +12,7 @@ venv/
 *.egg-info/
 
 # Generated experiment outputs and local caches
-artifacts/checkpoints/
-artifacts/logs/
-artifacts/reports/generated/
-artifacts/experiments/
-artifacts/studies/
+artifacts/
 records/experiments/
 .cache/
 tmp/pdfs/

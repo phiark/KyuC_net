@@ -26,8 +26,8 @@ class SampleAnalysisRecord:
     predicted_class_index: int
     resolution_ratio: float
     unknown_mass: float
-    content_entropy: float
-    resolution_weighted_content_entropy: float
+    state_content_entropy: float
+    state_weighted_content_entropy: float
     resolution_entropy: float
     top1_class_mass: float
     proposition_truth_mass: float
@@ -36,10 +36,10 @@ class SampleAnalysisRecord:
     proposition_truth_ratio: float
     ternary_entropy: float
     auxiliary_top1_content_probability: float
-    completion_score_beta_0_1: float
-    completion_score_beta_0_25: float
-    completion_score_beta_0_5: float
-    completion_score_beta_0_75: float
+    top1_completion_beta_0_1: float
+    top1_completion_beta_0_25: float
+    top1_completion_beta_0_5: float
+    top1_completion_beta_0_75: float
     candidate_class_indices: tuple[int, ...] = ()
 
     @property
@@ -47,16 +47,16 @@ class SampleAnalysisRecord:
         return self.auxiliary_top1_content_probability
 
     @property
-    def state_content_entropy(self) -> float:
-        return self.content_entropy
+    def content_entropy(self) -> float:
+        return self.state_content_entropy
 
     @property
-    def state_weighted_content_entropy(self) -> float:
-        return self.resolution_weighted_content_entropy
+    def resolution_weighted_content_entropy(self) -> float:
+        return self.state_weighted_content_entropy
 
     @property
     def state_entropy(self) -> float:
-        return self.resolution_entropy + self.resolution_weighted_content_entropy
+        return self.resolution_entropy + self.state_weighted_content_entropy
 
     @property
     def top1_view_truth_mass(self) -> float:
@@ -77,20 +77,20 @@ class SampleAnalysisRecord:
         return max(0.0, min(1.0, self.top1_class_mass / self.resolution_ratio))
 
     @property
-    def top1_completion_beta_0_1(self) -> float:
-        return self.completion_score_beta_0_1
+    def completion_score_beta_0_1(self) -> float:
+        return self.top1_completion_beta_0_1
 
     @property
-    def top1_completion_beta_0_25(self) -> float:
-        return self.completion_score_beta_0_25
+    def completion_score_beta_0_25(self) -> float:
+        return self.top1_completion_beta_0_25
 
     @property
-    def top1_completion_beta_0_5(self) -> float:
-        return self.completion_score_beta_0_5
+    def completion_score_beta_0_5(self) -> float:
+        return self.top1_completion_beta_0_5
 
     @property
-    def top1_completion_beta_0_75(self) -> float:
-        return self.completion_score_beta_0_75
+    def completion_score_beta_0_75(self) -> float:
+        return self.top1_completion_beta_0_75
 
     def to_csv_row(self) -> dict[str, str | float | int]:
         return {
@@ -109,8 +109,6 @@ class SampleAnalysisRecord:
             "state_content_entropy": self.state_content_entropy,
             "state_weighted_content_entropy": self.state_weighted_content_entropy,
             "state_entropy": self.state_entropy,
-            "content_entropy": self.content_entropy,
-            "resolution_weighted_content_entropy": self.resolution_weighted_content_entropy,
             "resolution_entropy": self.resolution_entropy,
             "top1_class_mass": self.top1_class_mass,
             "top1_view_truth_mass": self.top1_view_truth_mass,
@@ -127,10 +125,6 @@ class SampleAnalysisRecord:
             "top1_completion_beta_0_25": self.top1_completion_beta_0_25,
             "top1_completion_beta_0_5": self.top1_completion_beta_0_5,
             "top1_completion_beta_0_75": self.top1_completion_beta_0_75,
-            "completion_score_beta_0_1": self.completion_score_beta_0_1,
-            "completion_score_beta_0_25": self.completion_score_beta_0_25,
-            "completion_score_beta_0_5": self.completion_score_beta_0_5,
-            "completion_score_beta_0_75": self.completion_score_beta_0_75,
             "candidate_class_indices_json": json.dumps(list(self.candidate_class_indices)),
         }
 
@@ -309,8 +303,17 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
         for row in reader:
             top1_class_mass = float(row["top1_class_mass"])
             unknown_mass = float(row["unknown_mass"])
-            content_entropy_value = float(row["content_entropy"])
+            content_entropy_value = _read_float(
+                row,
+                "state_content_entropy",
+                _read_float(row, "content_entropy", 0.0),
+            )
             resolution_ratio_value = float(row["resolution_ratio"])
+            weighted_content_entropy_value = _read_float(
+                row,
+                "state_weighted_content_entropy",
+                _read_float(row, "resolution_weighted_content_entropy", resolution_ratio_value * content_entropy_value),
+            )
             auxiliary_top1_content_probability = _read_float(
                 row,
                 "auxiliary_top1_content_probability",
@@ -342,10 +345,8 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
                     predicted_class_index=int(row["predicted_class_index"]),
                     resolution_ratio=resolution_ratio_value,
                     unknown_mass=unknown_mass,
-                    content_entropy=content_entropy_value,
-                    resolution_weighted_content_entropy=float(
-                        row.get("resolution_weighted_content_entropy", resolution_ratio_value * content_entropy_value)
-                    ),
+                    state_content_entropy=content_entropy_value,
+                    state_weighted_content_entropy=weighted_content_entropy_value,
                     resolution_entropy=_read_float(row, "resolution_entropy", fallback_resolution_entropy),
                     top1_class_mass=top1_class_mass,
                     proposition_truth_mass=_read_float(row, "proposition_truth_mass", fallback_truth_mass),
@@ -354,13 +355,25 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
                     proposition_truth_ratio=_read_float(row, "proposition_truth_ratio", fallback_truth_ratio),
                     ternary_entropy=_read_float(row, "ternary_entropy", fallback_ternary_entropy),
                     auxiliary_top1_content_probability=auxiliary_top1_content_probability,
-                    completion_score_beta_0_1=float(row["completion_score_beta_0_1"]),
-                    completion_score_beta_0_25=float(
-                        row.get("completion_score_beta_0_25", top1_class_mass + (0.25 * unknown_mass))
+                    top1_completion_beta_0_1=_read_float(
+                        row,
+                        "top1_completion_beta_0_1",
+                        _read_float(row, "completion_score_beta_0_1", top1_class_mass + (0.1 * unknown_mass)),
                     ),
-                    completion_score_beta_0_5=float(row["completion_score_beta_0_5"]),
-                    completion_score_beta_0_75=float(
-                        row.get("completion_score_beta_0_75", top1_class_mass + (0.75 * unknown_mass))
+                    top1_completion_beta_0_25=_read_float(
+                        row,
+                        "top1_completion_beta_0_25",
+                        _read_float(row, "completion_score_beta_0_25", top1_class_mass + (0.25 * unknown_mass)),
+                    ),
+                    top1_completion_beta_0_5=_read_float(
+                        row,
+                        "top1_completion_beta_0_5",
+                        _read_float(row, "completion_score_beta_0_5", top1_class_mass + (0.5 * unknown_mass)),
+                    ),
+                    top1_completion_beta_0_75=_read_float(
+                        row,
+                        "top1_completion_beta_0_75",
+                        _read_float(row, "completion_score_beta_0_75", top1_class_mass + (0.75 * unknown_mass)),
                     ),
                     candidate_class_indices=tuple(json.loads(row["candidate_class_indices_json"])),
                 )
