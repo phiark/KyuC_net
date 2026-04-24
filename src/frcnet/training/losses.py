@@ -14,6 +14,14 @@ class LossConfig:
     weight_id: float = 1.0
     weight_unknown: float = 1.0
     weight_ambiguous: float = 1.0
+    unknown_content_entropy_weight: float = 0.0
+    hard_id_label_smoothing: float = 0.0
+    hard_id_resolution_floor: float = 0.0
+    hard_id_resolution_weight: float = 0.0
+    hard_id_entropy_ceiling: float = 0.0
+    hard_id_entropy_weight: float = 0.0
+    ambiguous_entropy_floor_margin: float = 0.0
+    ambiguous_entropy_floor_weight: float = 0.0
     ambiguous_resolution_target: float = 0.8
     ambiguous_resolution_weight: float = 1.0
 
@@ -41,12 +49,17 @@ def _connected_zero(reference_tensor: torch.Tensor) -> torch.Tensor:
     return reference_tensor * 0.0
 
 
+def _content_entropy(content_distribution: torch.Tensor) -> torch.Tensor:
+    safe_distribution = content_distribution.clamp_min(torch.finfo(content_distribution.dtype).eps)
+    return -(safe_distribution * torch.log(safe_distribution)).sum(dim=1)
+
+
 def _normalize_loss_config(loss_config: LossConfig | Mapping[str, float] | None) -> LossConfig:
     if loss_config is None:
         return LossConfig()
     if isinstance(loss_config, LossConfig):
         return loss_config
-    return LossConfig(**loss_config)
+    return LossConfig(**{key: float(value) for key, value in loss_config.items()})
 
 
 def compute_total_loss(
@@ -66,21 +79,54 @@ def compute_total_loss(
 
     loss_id = _connected_zero(reference)
     id_loss_terms: list[torch.Tensor] = []
+    id_regularizers: list[torch.Tensor] = []
     if bool(easy_id_mask.any()):
         target_index = batch_input.class_label[easy_id_mask].long()
         selected_mass = model_output.class_mass[easy_id_mask].gather(1, target_index.unsqueeze(1)).squeeze(1)
         id_loss_terms.append(-_safe_log(selected_mass))
     if bool(hard_id_mask.any()):
         target_index = batch_input.class_label[hard_id_mask].long()
-        selected_mass = model_output.class_mass[hard_id_mask].gather(1, target_index.unsqueeze(1)).squeeze(1)
-        id_loss_terms.append(-_safe_log(selected_mass))
+        hard_class_mass = model_output.class_mass[hard_id_mask]
+        if resolved_config.hard_id_label_smoothing > 0.0:
+            smoothing = min(max(float(resolved_config.hard_id_label_smoothing), 0.0), 1.0)
+            target_distribution = torch.full_like(hard_class_mass, smoothing / float(model_output.num_classes))
+            target_distribution.scatter_add_(
+                1,
+                target_index.unsqueeze(1),
+                torch.full((int(target_index.shape[0]), 1), 1.0 - smoothing, device=device, dtype=hard_class_mass.dtype),
+            )
+            id_loss_terms.append(-(target_distribution * _safe_log(hard_class_mass)).sum(dim=1))
+        else:
+            selected_mass = hard_class_mass.gather(1, target_index.unsqueeze(1)).squeeze(1)
+            id_loss_terms.append(-_safe_log(selected_mass))
+
+        if resolved_config.hard_id_resolution_weight > 0.0 and resolved_config.hard_id_resolution_floor > 0.0:
+            resolution_penalty = (
+                torch.relu(float(resolved_config.hard_id_resolution_floor) - model_output.resolution_ratio[hard_id_mask])
+                .pow(2)
+                .mean()
+            )
+            id_regularizers.append(float(resolved_config.hard_id_resolution_weight) * resolution_penalty)
+        if resolved_config.hard_id_entropy_weight > 0.0 and resolved_config.hard_id_entropy_ceiling > 0.0:
+            hard_entropy = _content_entropy(model_output.content_distribution[hard_id_mask])
+            entropy_penalty = torch.relu(hard_entropy - float(resolved_config.hard_id_entropy_ceiling)).pow(2).mean()
+            id_regularizers.append(float(resolved_config.hard_id_entropy_weight) * entropy_penalty)
     if id_loss_terms:
         loss_id = torch.cat(id_loss_terms).mean()
+    if id_regularizers:
+        loss_id = loss_id + sum(id_regularizers, _connected_zero(reference))
 
     loss_unknown = _connected_zero(reference)
     if bool(unknown_mask.any()):
         selected_unknown_mass = model_output.unknown_mass[unknown_mask]
         loss_unknown = (-_safe_log(selected_unknown_mass)).mean()
+        if resolved_config.unknown_content_entropy_weight > 0.0:
+            unknown_entropy = _content_entropy(model_output.content_distribution[unknown_mask])
+            max_entropy = torch.log(
+                torch.tensor(float(model_output.num_classes), device=device, dtype=unknown_entropy.dtype)
+            )
+            entropy_gap = (max_entropy - unknown_entropy).clamp_min(0.0).mean()
+            loss_unknown = loss_unknown + (float(resolved_config.unknown_content_entropy_weight) * entropy_gap)
 
     loss_ambiguous = _connected_zero(reference)
     if bool(ambiguous_mask.any()):
@@ -99,6 +145,14 @@ def compute_total_loss(
             model_output.resolution_ratio[ambiguous_mask] - resolved_config.ambiguous_resolution_target
         ).pow(2).mean()
         loss_ambiguous = content_loss + (resolved_config.ambiguous_resolution_weight * resolution_loss)
+        if resolved_config.ambiguous_entropy_floor_weight > 0.0:
+            content_entropy = _content_entropy(model_output.content_distribution[ambiguous_mask])
+            entropy_floor = torch.log(candidate_count.squeeze(1).to(dtype=content_entropy.dtype)).to(device)
+            entropy_floor = entropy_floor + float(resolved_config.ambiguous_entropy_floor_margin)
+            entropy_penalty = torch.relu(entropy_floor - content_entropy).pow(2).mean()
+            loss_ambiguous = loss_ambiguous + (
+                float(resolved_config.ambiguous_entropy_floor_weight) * entropy_penalty
+            )
 
     loss_total = (
         (resolved_config.weight_id * loss_id)

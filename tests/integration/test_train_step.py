@@ -28,6 +28,37 @@ def test_compute_total_loss_routes_all_training_cohorts():
     assert torch.isfinite(loss_breakdown.loss_total)
 
 
+def test_compute_total_loss_accepts_v0_2_curriculum_overrides():
+    batch_input = build_synthetic_batch()
+    model = FRCNetModel(num_classes=10)
+    model_output = model(batch_input.image)
+
+    loss_breakdown = compute_total_loss(
+        model_output,
+        batch_input,
+        {
+            "weight_id": 0.75,
+            "weight_unknown": 1.0,
+            "weight_ambiguous": 1.25,
+            "unknown_content_entropy_weight": 0.35,
+            "hard_id_label_smoothing": 0.1,
+            "hard_id_resolution_floor": 0.85,
+            "hard_id_resolution_weight": 0.3,
+            "hard_id_entropy_ceiling": 1.0,
+            "hard_id_entropy_weight": 0.2,
+            "ambiguous_entropy_floor_margin": 0.1,
+            "ambiguous_entropy_floor_weight": 0.2,
+            "ambiguous_resolution_target": 0.8,
+            "ambiguous_resolution_weight": 1.0,
+        },
+    )
+
+    assert torch.isfinite(loss_breakdown.loss_id)
+    assert torch.isfinite(loss_breakdown.loss_unknown)
+    assert torch.isfinite(loss_breakdown.loss_ambiguous)
+    assert torch.isfinite(loss_breakdown.loss_total)
+
+
 def test_run_train_step_cpu_smoke():
     batch_input = build_synthetic_batch()
     model = FRCNetModel(num_classes=10)
