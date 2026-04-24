@@ -16,10 +16,11 @@
 | `r` | resolution ratio | `resolution_ratio` |
 | `u` | explicit unknown mass | `unknown_mass` |
 | `tau` | proposition truth ratio | `proposition_truth_ratio` |
-| `H_cont` | content entropy in resolved subspace | `content_entropy` |
+| `H_K(c)` | K-class state content entropy | `state_content_entropy` |
+| `rH_K(c)` | state weighted content entropy | `state_weighted_content_entropy` |
 | `H_res` | binary entropy on resolved vs unknown | `resolution_entropy` |
 | `H_3` | ternary entropy on proposition truth / false / unknown | `ternary_entropy` |
-| `q_beta` | completion-dependent scalar readout | `completion_score_beta_0_1`, `completion_score_beta_0_5` |
+| `q_beta` | completion-dependent scalar readout | `top1_completion_beta_0_1`, `top1_completion_beta_0_5` |
 
 ## 3. 论文结论单元到产物单元
 
@@ -27,8 +28,8 @@
 
 论文主张:
 
-- easy ID 应集中在高 `resolution_ratio`、低 `content_entropy`
-- ambiguous ID 应在中高 `resolution_ratio`、较高 `content_entropy`
+- easy ID 应集中在高 `resolution_ratio`、低 `state_content_entropy`
+- ambiguous ID 应在中高 `resolution_ratio`、较高 `state_content_entropy`
 - OOD / unknown 应在低 `resolution_ratio`
 
 仓库产物:
@@ -48,15 +49,15 @@
 
 仓库产物:
 
-- `sample_analysis_records.csv` 中的 `completion_score_beta_0_1`
-- `sample_analysis_records.csv` 中的 `completion_score_beta_0_5`
+- `sample_analysis_records.csv` 中的 `top1_completion_beta_0_1`
+- `sample_analysis_records.csv` 中的 `top1_completion_beta_0_5`
 
 ### 3.3 Ambiguous-vs-OOD 判别
 
 论文主张:
 
-- 主 pair 使用 `(resolution_ratio, content_entropy)`
-- 主 scalar baseline 使用 `completion_score_beta_0_1`
+- 主 pair 使用 `(resolution_ratio, state_content_entropy)`
+- 主 scalar baseline 使用 `top1_completion_beta_0_1`
 
 仓库产物:
 
@@ -66,6 +67,7 @@
 约束:
 
 - `tau = proposition_truth_ratio` 只进入 proposition diagnostics, 不再进入主 matched benchmark 主表
+- target/candidate proposition view 只进入 audit; `top1_view` 才是主 benchmark 可用的 label-free proposition view
 
 ## 4. 记录层
 
@@ -134,8 +136,9 @@
 ## 5. 默认实验协议
 
 - protocol id: `plan_a_v0_3debug_r2_*`
-- default pair: `(resolution_ratio, content_entropy)`
-- default scalar: `completion_score_beta_0_1`
+- current v0.2 protocol id: `plan_a_next_v0_2_*`
+- default pair: `(resolution_ratio, state_content_entropy)`
+- default scalar: `top1_completion_beta_0_1`
 - default diagnostic tau: `proposition_truth_ratio`
 - default primary checkpoint policy: `balanced`
 - default companion checkpoint policy: `theory`

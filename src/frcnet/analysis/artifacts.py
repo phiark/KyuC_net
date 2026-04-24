@@ -36,14 +36,14 @@ def write_geometry_scatter(records: list[SampleAnalysisRecord], output_path: str
         cohort_records = [record for record in records if record.cohort_name == cohort_name]
         plt.scatter(
             [record.resolution_ratio for record in cohort_records],
-            [record.content_entropy for record in cohort_records],
+            [record.state_content_entropy for record in cohort_records],
             label=cohort_name,
             s=18,
             alpha=0.7,
             color=COHORT_COLORS.get(cohort_name, "#333333"),
         )
     plt.xlabel("resolution_ratio")
-    plt.ylabel("content_entropy")
+    plt.ylabel("state_content_entropy")
     plt.title("FRCNet Geometry Scatter")
     plt.legend()
     plt.tight_layout()
@@ -58,14 +58,14 @@ def write_geometry_hexbin(records: list[SampleAnalysisRecord], output_path: str 
     plt.figure(figsize=(8, 6))
     plt.hexbin(
         [record.resolution_ratio for record in records],
-        [record.content_entropy for record in records],
+        [record.state_content_entropy for record in records],
         gridsize=24,
         cmap="viridis",
         mincnt=1,
     )
     plt.colorbar(label="count")
     plt.xlabel("resolution_ratio")
-    plt.ylabel("content_entropy")
+    plt.ylabel("state_content_entropy")
     plt.title("FRCNet Geometry Hexbin")
     plt.tight_layout()
     plt.savefig(output, dpi=dpi)
@@ -82,7 +82,7 @@ def _build_cohort_occupancy_histograms(
 ) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray]:
     if resolution_bin_count <= 0 or entropy_bin_count <= 0:
         raise ValueError("resolution_bin_count and entropy_bin_count must be positive.")
-    max_entropy = max((record.content_entropy for record in records), default=0.0)
+    max_entropy = max((record.state_content_entropy for record in records), default=0.0)
     entropy_upper = max(max_entropy, 1e-6)
     resolution_edges = np.linspace(0.0, 1.0, resolution_bin_count + 1, dtype=np.float64)
     entropy_edges = np.linspace(0.0, entropy_upper, entropy_bin_count + 1, dtype=np.float64)
@@ -92,7 +92,7 @@ def _build_cohort_occupancy_histograms(
         cohort_records = [record for record in records if record.cohort_name == cohort_name]
         if cohort_records:
             histogram, _, _ = np.histogram2d(
-                [record.content_entropy for record in cohort_records],
+                [record.state_content_entropy for record in cohort_records],
                 [record.resolution_ratio for record in cohort_records],
                 bins=(entropy_edges, resolution_edges),
             )
@@ -126,7 +126,7 @@ def write_cohort_occupancy(records: list[SampleAnalysisRecord], output_path: str
         )
         axis.set_title(cohort_name)
         axis.set_xlabel("resolution_ratio")
-        axis.set_ylabel("content_entropy")
+        axis.set_ylabel("state_content_entropy")
     for axis in flattened_axes[len(COHORT_PANEL_ORDER) :]:
         axis.axis("off")
     if image is not None:
@@ -238,8 +238,9 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
             "count",
             "mean_resolution_ratio",
             "mean_unknown_mass",
-            "mean_content_entropy",
-            "mean_resolution_weighted_content_entropy",
+            "mean_state_content_entropy",
+            "mean_state_weighted_content_entropy",
+            "mean_state_entropy",
             "mean_resolution_entropy",
             "mean_proposition_truth_mass",
             "mean_proposition_false_mass",
@@ -247,10 +248,10 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
             "mean_proposition_truth_ratio",
             "mean_ternary_entropy",
             "mean_auxiliary_top1_content_probability",
-            "mean_completion_score_beta_0_1",
-            "mean_completion_score_beta_0_25",
-            "mean_completion_score_beta_0_5",
-            "mean_completion_score_beta_0_75",
+            "mean_top1_completion_beta_0_1",
+            "mean_top1_completion_beta_0_25",
+            "mean_top1_completion_beta_0_5",
+            "mean_top1_completion_beta_0_75",
         ]
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -262,10 +263,11 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
                     "count": len(cohort_records),
                     "mean_resolution_ratio": mean(record.resolution_ratio for record in cohort_records),
                     "mean_unknown_mass": mean(record.unknown_mass for record in cohort_records),
-                    "mean_content_entropy": mean(record.content_entropy for record in cohort_records),
-                    "mean_resolution_weighted_content_entropy": mean(
-                        record.resolution_weighted_content_entropy for record in cohort_records
+                    "mean_state_content_entropy": mean(record.state_content_entropy for record in cohort_records),
+                    "mean_state_weighted_content_entropy": mean(
+                        record.state_weighted_content_entropy for record in cohort_records
                     ),
+                    "mean_state_entropy": mean(record.state_entropy for record in cohort_records),
                     "mean_resolution_entropy": mean(record.resolution_entropy for record in cohort_records),
                     "mean_proposition_truth_mass": mean(record.proposition_truth_mass for record in cohort_records),
                     "mean_proposition_false_mass": mean(record.proposition_false_mass for record in cohort_records),
@@ -275,17 +277,17 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
                     "mean_auxiliary_top1_content_probability": mean(
                         record.auxiliary_top1_content_probability for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_1": mean(
-                        record.completion_score_beta_0_1 for record in cohort_records
+                    "mean_top1_completion_beta_0_1": mean(
+                        record.top1_completion_beta_0_1 for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_25": mean(
-                        record.completion_score_beta_0_25 for record in cohort_records
+                    "mean_top1_completion_beta_0_25": mean(
+                        record.top1_completion_beta_0_25 for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_5": mean(
-                        record.completion_score_beta_0_5 for record in cohort_records
+                    "mean_top1_completion_beta_0_5": mean(
+                        record.top1_completion_beta_0_5 for record in cohort_records
                     ),
-                    "mean_completion_score_beta_0_75": mean(
-                        record.completion_score_beta_0_75 for record in cohort_records
+                    "mean_top1_completion_beta_0_75": mean(
+                        record.top1_completion_beta_0_75 for record in cohort_records
                     ),
                 }
             )
@@ -330,6 +332,7 @@ def write_proposition_diagnostic_table(
         negative_cohort=negative_cohort,
         test_size=test_size,
         random_state=random_state,
+        allow_label_aware=True,
     )
     return write_scalar_benchmark_summaries(summaries, output_path)
 

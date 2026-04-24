@@ -51,6 +51,7 @@ Installation notes by platform are documented in [Runtime Environment Matrix](do
 - [System Requirements Specification](docs/requirements/system_requirements_specification.md)
 - [Architecture Description](docs/architecture/architecture_description.md)
 - [Plan A Paper Linkage](docs/architecture/plan_a_paper_linkage.md)
+- [Plan A Next v0.2 Protocol](docs/architecture/plan_a_next_v0_2_protocol.md)
 - [Plan A v0.3debug Protocol](docs/architecture/plan_a_v0_3debug_protocol.md)
 - [Plan A v0.3debug R2 Protocol](docs/architecture/plan_a_v0_3debug_r2_protocol.md)
 - [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md)
@@ -60,6 +61,7 @@ Installation notes by platform are documented in [Runtime Environment Matrix](do
 - [ADR-0002 Plan A Protocol Baseline](records/decisions/adr_0002_plan_a_protocol_baseline.md)
 - [ADR-0004 v0.3debug Theory Alignment Repair](records/decisions/adr_0004_v0_3debug_theory_alignment_repair.md)
 - [ADR-0005 v0.3debug R2 Benchmark And Geometry Repair](records/decisions/adr_0005_v0_3debug_r2_benchmark_and_geometry_repair.md)
+- [ADR-0006 Plan A Next v0.2 Data Semantic Baseline](records/decisions/adr_0006_plan_a_next_v0_2_data_semantic_baseline.md)
 
 ## Repository Layout
 
@@ -82,6 +84,7 @@ The repository now contains:
 - document-driven governance and architecture baselines
 - a curriculum-capable FRCNet 0.3 / v0.3debug model and workflow core
 - a `v0.3debug_r2` repair line with balanced-primary dual export and resolved-side geometry regularization
+- a `plan_a_next_v0_2` data-semantic baseline with state/top1 canonical fields and frozen matched-manifest contracts
 - cross-platform runtime resolution for MPS / ROCm / CUDA / CPU
 - contract tests and smoke training tests
 - a Plan A protocol chain from manifest to proposition-aware analysis record to paper-facing artifacts
@@ -111,6 +114,7 @@ The repository now provides three workflow levels:
 - single-step training / inference / artifact scripts
 - single-run end-to-end experiment bundling
 - the default v0.3debug R2 multi-seed study workflow for paper-facing results
+- the Plan A Next v0.2 multi-seed baseline protocol for clean data semantics and model understanding
 
 Prepare datasets and verify local availability:
 
@@ -140,6 +144,13 @@ python scripts/run_plan_a_study.py \
   --study-config configs/study/plan_a_v0_3debug_r2_study.yaml
 ```
 
+Run the Plan A Next v0.2 study configuration:
+
+```bash
+python scripts/run_plan_a_study.py \
+  --study-config configs/study/plan_a_next_v0_2_study.yaml
+```
+
 Rebuild aggregate outputs from an existing study root:
 
 ```bash
@@ -149,6 +160,8 @@ python scripts/aggregate_plan_a_study.py \
 ```
 
 In `v0.3debug_r2`, `tau = proposition_truth_ratio` is exported as a proposition diagnostic only. The primary matched benchmark and aggregate AUROC plots compare `pair / weighted_pair / scalar`, while `theory` remains a companion export beside the `balanced` primary line.
+
+In `plan_a_next_v0_2`, canonical analysis fields are `state_content_entropy`, `state_weighted_content_entropy`, `state_entropy`, and `top1_completion_beta_*`. Label-aware target/candidate proposition fields are diagnostics only and are rejected from the primary matched benchmark whitelist.
 
 Analysis-only export remains available as a separate chain:
 

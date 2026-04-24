@@ -43,9 +43,11 @@ HardMin/
 ├── configs/
 │   ├── model/
 │   ├── data/
+│   ├── protocol/
 │   ├── train/
 │   ├── eval/
-│   └── analysis/
+│   ├── analysis/
+│   └── study/
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -106,4 +108,3 @@ HardMin/
 3. `src/frcnet/models/frcnet_model.py`
 4. `src/frcnet/training/losses.py`
 5. `tests/contract/test_output_contracts.py`
-

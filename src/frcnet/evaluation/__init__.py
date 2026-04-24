@@ -1,13 +1,22 @@
 """Evaluation components for FRCNet."""
 
 from frcnet.evaluation.inference import (
+    build_proposition_view_records,
     build_sample_analysis_records,
     build_top1_proposition_records,
     run_inference_export,
 )
+from frcnet.evaluation.beta_policy import (
+    binary_pignistic_beta,
+    candidate_symmetric_beta,
+    completion_from_view,
+    top1_symmetric_beta,
+)
 from frcnet.evaluation.matched_benchmark import (
     DEFAULT_COMPLETION_SCAN_SCALARS,
     DEFAULT_WEIGHTED_PAIR_NAME,
+    SUPPORTED_DIAGNOSTIC_SCALAR_FEATURES,
+    SUPPORTED_PRIMARY_SCALAR_FEATURES,
     MatchedBenchmarkSummary,
     ScalarBenchmarkSummary,
     ScalarRocCurve,
@@ -17,17 +26,34 @@ from frcnet.evaluation.matched_benchmark import (
     write_matched_benchmark_summary,
     write_scalar_benchmark_summaries,
 )
+from frcnet.evaluation.matched_manifest import (
+    MatchedManifestRecord,
+    compute_matched_manifest_hash,
+    construction_config_hash,
+    read_matched_manifest,
+    with_manifest_hash,
+    write_matched_manifest,
+)
 from frcnet.evaluation.records import (
     AnalysisExportSummary,
     DEFAULT_MODEL_FAMILY,
+    PropositionViewRecord,
     SampleAnalysisRecord,
     Top1PropositionRecord,
     read_analysis_export_summary,
+    read_proposition_view_records,
     read_sample_analysis_records,
     read_top1_proposition_records,
     write_analysis_export_summary,
+    write_proposition_view_records,
     write_sample_analysis_records,
     write_top1_proposition_records,
+)
+from frcnet.evaluation.reference_baselines import softmax_entropy_reference_scores
+from frcnet.evaluation.state_metrics import (
+    state_content_entropy,
+    state_entropy,
+    state_weighted_content_entropy,
 )
 
 __all__ = [
@@ -36,22 +62,42 @@ __all__ = [
     "DEFAULT_COMPLETION_SCAN_SCALARS",
     "DEFAULT_WEIGHTED_PAIR_NAME",
     "MatchedBenchmarkSummary",
+    "MatchedManifestRecord",
+    "PropositionViewRecord",
     "SampleAnalysisRecord",
     "ScalarBenchmarkSummary",
     "ScalarRocCurve",
+    "SUPPORTED_DIAGNOSTIC_SCALAR_FEATURES",
+    "SUPPORTED_PRIMARY_SCALAR_FEATURES",
     "Top1PropositionRecord",
+    "binary_pignistic_beta",
     "build_scalar_roc_curve",
+    "build_proposition_view_records",
     "build_sample_analysis_records",
     "build_top1_proposition_records",
+    "candidate_symmetric_beta",
+    "completion_from_view",
+    "compute_matched_manifest_hash",
+    "construction_config_hash",
     "read_analysis_export_summary",
+    "read_matched_manifest",
+    "read_proposition_view_records",
     "read_sample_analysis_records",
     "read_top1_proposition_records",
     "run_inference_export",
+    "softmax_entropy_reference_scores",
+    "state_content_entropy",
+    "state_entropy",
+    "state_weighted_content_entropy",
     "summarize_matched_ambiguous_vs_ood",
     "summarize_scalar_benchmarks",
+    "top1_symmetric_beta",
+    "with_manifest_hash",
     "write_matched_benchmark_summary",
+    "write_matched_manifest",
     "write_scalar_benchmark_summaries",
     "write_analysis_export_summary",
+    "write_proposition_view_records",
     "write_sample_analysis_records",
     "write_top1_proposition_records",
 ]

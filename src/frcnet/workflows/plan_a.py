@@ -43,14 +43,17 @@ from frcnet.data import (
 from frcnet.evaluation import (
     AnalysisExportSummary,
     DEFAULT_MODEL_FAMILY,
+    build_proposition_view_records,
     build_top1_proposition_records,
     read_analysis_export_summary,
+    read_matched_manifest,
     read_sample_analysis_records,
     read_top1_proposition_records,
     run_inference_export,
     summarize_matched_ambiguous_vs_ood,
     write_analysis_export_summary,
     write_matched_benchmark_summary,
+    write_proposition_view_records,
     write_sample_analysis_records,
     write_top1_proposition_records,
 )
@@ -213,17 +216,18 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
         return {
             "positive_cohort": "ambiguous_id",
             "negative_cohort": "ood",
-            "primary_pair": "resolution_ratio__content_entropy",
-            "weighted_pair": "resolution_ratio__resolution_weighted_content_entropy",
-            "primary_scalar": "completion_score_beta_0_1",
+            "primary_pair": "resolution_ratio__state_content_entropy",
+            "weighted_pair": "resolution_ratio__state_weighted_content_entropy",
+            "primary_scalar": "top1_completion_beta_0_1",
             "tau_scalar_name": "proposition_truth_ratio",
             "completion_scan_scalars": (
-                "completion_score_beta_0_1",
-                "completion_score_beta_0_25",
-                "completion_score_beta_0_5",
-                "completion_score_beta_0_75",
+                "top1_completion_beta_0_1",
+                "top1_completion_beta_0_25",
+                "top1_completion_beta_0_5",
+                "top1_completion_beta_0_75",
             ),
             "emit_proposition_diagnostics": True,
+            "matched_manifest_path": "",
             "test_size": 0.3,
             "random_state": 7,
         }
@@ -232,26 +236,37 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
     completion_scan_scalars = eval_config.get(
         "completion_scan_scalars",
         (
-            "completion_score_beta_0_1",
-            "completion_score_beta_0_25",
-            "completion_score_beta_0_5",
-            "completion_score_beta_0_75",
+            "top1_completion_beta_0_1",
+            "top1_completion_beta_0_25",
+            "top1_completion_beta_0_5",
+            "top1_completion_beta_0_75",
         ),
     )
     return {
         "positive_cohort": str(eval_config.get("positive_cohort", "ambiguous_id")),
         "negative_cohort": str(eval_config.get("negative_cohort", "ood")),
-        "primary_pair": str(eval_config.get("primary_pair", "resolution_ratio__content_entropy")),
+        "primary_pair": str(eval_config.get("primary_pair", "resolution_ratio__state_content_entropy")),
         "weighted_pair": str(
-            eval_config.get("weighted_pair", "resolution_ratio__resolution_weighted_content_entropy")
+            eval_config.get("weighted_pair", "resolution_ratio__state_weighted_content_entropy")
         ),
-        "primary_scalar": str(eval_config.get("primary_scalar", "completion_score_beta_0_1")),
+        "primary_scalar": str(eval_config.get("primary_scalar", "top1_completion_beta_0_1")),
         "tau_scalar_name": str(eval_config.get("tau_scalar_name", "proposition_truth_ratio")),
         "completion_scan_scalars": tuple(str(value) for value in completion_scan_scalars),
         "emit_proposition_diagnostics": bool(eval_config.get("emit_proposition_diagnostics", True)),
+        "matched_manifest_path": str(eval_config.get("matched_manifest_path", "")),
         "test_size": float(eval_config.get("test_size", 0.3)),
         "random_state": int(eval_config.get("random_state", 7)),
     }
+
+
+def _read_optional_matched_manifest(resolved_eval_config: Mapping[str, Any]):
+    manifest_path = str(resolved_eval_config.get("matched_manifest_path", ""))
+    if not manifest_path:
+        return None
+    path = Path(manifest_path)
+    if not path.exists():
+        return None
+    return read_matched_manifest(path)
 
 
 def _normalize_training_phases(train_config: Mapping[str, Any]) -> list[TrainPhase]:
@@ -799,6 +814,7 @@ def _evaluate_validation_epoch(
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
         random_state=int(resolved_eval_config["random_state"]),
+        matched_manifest_records=_read_optional_matched_manifest(resolved_eval_config),
     )
     validation_summary = ValidationEpochSummary(
         epoch=epoch,
@@ -1698,11 +1714,16 @@ def export_plan_a_inference_bundle(
         model_family=model_family,
     )
     proposition_records = build_top1_proposition_records(sample_analysis_records)
+    proposition_view_records = build_proposition_view_records(sample_analysis_records)
 
     analysis_path = write_sample_analysis_records(sample_analysis_records, output_root / "sample_analysis_records.csv")
     proposition_path = write_top1_proposition_records(
         proposition_records,
         output_root / "top1_proposition_records.csv",
+    )
+    proposition_view_path = write_proposition_view_records(
+        proposition_view_records,
+        output_root / "proposition_view_records.csv",
     )
     analysis_summary_path = write_analysis_export_summary(
         AnalysisExportSummary(
@@ -1735,6 +1756,7 @@ def export_plan_a_inference_bundle(
         "manifest_snapshot_path": str(manifest_snapshot_path),
         "analysis_path": str(analysis_path),
         "proposition_path": str(proposition_path),
+        "proposition_view_path": str(proposition_view_path),
         "analysis_summary_path": str(analysis_summary_path),
         "checkpoint_selection_summary_path": ""
         if checkpoint_selection_summary_path is None
@@ -1908,6 +1930,7 @@ def generate_plan_a_artifact_bundle(
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
         random_state=int(resolved_eval_config["random_state"]),
+        matched_manifest_records=_read_optional_matched_manifest(resolved_eval_config),
     )
     matched_path = write_matched_benchmark_summary(
         matched_summary,

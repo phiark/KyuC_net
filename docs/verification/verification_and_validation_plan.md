@@ -18,11 +18,13 @@
 - `VER-UNIT-001`: `class_mass.sum + unknown_mass == 1`
 - `VER-UNIT-002`: `unknown_mass == 1 - resolution_ratio`
 - `VER-UNIT-003`: `content_distribution.sum == 1`
-- `VER-UNIT-004`: `content_entropy` 数值范围正确
-- `VER-UNIT-005`: `completion_score` 对不同 beta 的计算一致
+- `VER-UNIT-004`: `state_content_entropy` 数值范围正确
+- `VER-UNIT-005`: `top1_completion_beta_*` 对不同 beta 的计算一致
 - `VER-UNIT-006`: proposition mass 分解满足 `truth + false + unknown = 1`
 - `VER-UNIT-007`: `resolution_entropy` 与 `ternary_entropy` 数值范围正确
 - `VER-UNIT-008`: unknown-content regularizer 对 peaked `content_distribution` 给出更高惩罚
+- `VER-UNIT-009`: `state_entropy = resolution_entropy + state_weighted_content_entropy`
+- `VER-UNIT-010`: beta policy 默认值按 view 计算, top1=`1/K`, candidate=`|S|/K`, binary pignistic=`0.5`
 
 ### 2.2 Contract Verification
 
@@ -35,6 +37,8 @@
 - `VER-CON-005`: manifest contract 保证非空、单一 `protocol_id` 与唯一 `sample_id`
 - `VER-CON-006`: analysis/report bundle contract 保证 run/protocol 与 sample set 一致
 - `VER-CON-007`: proposition record contract 保证规范 `tau` 已切换到 `proposition_truth_ratio`
+- `VER-CON-008`: v0.2 primary scalar whitelist 不包含 label-aware proposition fields
+- `VER-CON-009`: frozen matched manifest hash 对同配置稳定, 对 reference score 改动敏感
 
 ### 2.3 Integration Verification
 
@@ -56,6 +60,8 @@
 - `VER-INT-014`: aggregate report 能识别并保留 `model_family`
 - `VER-INT-015`: study / experiment 会同时导出 primary policy 与 companion policy 的 `analysis* / report*`
 - `VER-INT-016`: 主 matched benchmark 与 aggregate 主图不会再包含 proposition diagnostic `tau`
+- `VER-INT-017`: hard-ID manifest recipe 参数来自协议配置, 不被实现层静默覆盖
+- `VER-INT-018`: formal matched benchmark 可使用 frozen matched manifest, 不依赖临时数量截断
 
 ### 2.4 Scientific Validation
 
@@ -65,6 +71,7 @@
 - `VER-SCI-002`: pair 相对最佳 scalar 的 matched benchmark 表现
 - `VER-SCI-003`: completion sensitivity 可观测
 - `VER-SCI-004`: easy ID accuracy 不出现不可接受退化
+- `VER-SCI-005`: v0.2 final test 达到 release gate 或明确标记 partial/negative evidence
 
 ## 3. 需求到验证映射
 
@@ -92,11 +99,17 @@
 | `REQ-FN-032` | `VER-INT-014` |
 | `REQ-FN-033` | `VER-INT-015` |
 | `REQ-FN-034` | `VER-INT-004` |
+| `REQ-FN-035` | `VER-CON-003`, `VER-UNIT-009` |
+| `REQ-FN-036` | `VER-UNIT-006`, `VER-CON-008` |
+| `REQ-FN-037` | `VER-CON-009`, `VER-INT-018` |
+| `REQ-FN-038` | `VER-CON-008`, `VER-INT-016` |
 | `REQ-SCI-001` | `VER-SCI-001` |
 | `REQ-SCI-002` | `VER-SCI-002` |
 | `REQ-SCI-003` | `VER-SCI-004` |
 | `REQ-SCI-004` | `VER-INT-009` |
 | `REQ-SCI-005` | `VER-CON-007`, `VER-SCI-003` |
+| `REQ-SCI-006` | `VER-SCI-002`, `VER-SCI-005` |
+| `REQ-SCI-007` | `VER-SCI-004`, `VER-SCI-005` |
 
 ## 4. 进入实现前的门槛
 

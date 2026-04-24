@@ -53,8 +53,8 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 
 ### 3.4 Evaluation And Analysis
 
-- `REQ-FN-012`: 系统必须记录 `resolution_ratio`、`unknown_mass`、`content_entropy`
-- `REQ-FN-013`: 系统必须支持生成 `(resolution_ratio, content_entropy)` 的散点图、hexbin 图与二维 cohort occupancy 图
+- `REQ-FN-012`: 系统必须记录 `resolution_ratio`、`unknown_mass`、`state_content_entropy`
+- `REQ-FN-013`: 系统必须支持生成 `(resolution_ratio, state_content_entropy)` 的散点图、hexbin 图与二维 cohort occupancy 图
 - `REQ-FN-014`: 系统必须支持 matched benchmark, 检验 pair 相对最佳 scalar 的增益, 且主 benchmark 不得混入 label-aware proposition diagnostics
 - `REQ-FN-015`: 系统必须支持不同 `completion_policy_beta` 下的 completion sensitivity 分析
 
@@ -90,6 +90,10 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-FN-032`: study / report / aggregate 记录必须显式携带 `model_family`, 并为 `softmax_ce` 预留合法 family 名
 - `REQ-FN-033`: 系统必须支持 dual export, 主线 policy 与伴随 diagnostics policy 分别写入独立 `analysis* / report*` 目录
 - `REQ-FN-034`: 当导出 `cohort_occupancy.png` 时, 内容必须是二维几何 occupancy 图; cohort count 必须写入独立 artifact
+- `REQ-FN-035`: 系统必须以 `state_content_entropy`, `state_weighted_content_entropy`, `state_entropy` 作为 v0.2 canonical state 字段, 旧字段只作为 legacy alias
+- `REQ-FN-036`: 系统必须区分 label-free `top1_view` 与 label-aware target/candidate proposition views
+- `REQ-FN-037`: formal matched benchmark 必须支持 frozen matched manifest, 并记录 reference score 与 manifest hash
+- `REQ-FN-038`: 主 benchmark feature whitelist 不得包含 label-aware proposition fields
 
 ## 4. 非功能需求
 
@@ -106,9 +110,11 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-SCI-003`: 不应以明显牺牲 easy ID accuracy 为代价换取 unknown 分离
 - `REQ-SCI-004`: 多 seed study 结果应复用同一份 evaluation manifest, 不得因重新采样导致结论漂移
 - `REQ-SCI-005`: `tau` 的规范口径必须来自 proposition layer, 不得继续把 top-1 surrogate 当作唯一规范 `tau`
+- `REQ-SCI-006`: `plan_a_next_v0_2` final test 的 pair AUROC 应达到 `0.95`, 并比 best one-feature scalar 高至少 `0.02`
+- `REQ-SCI-007`: `plan_a_next_v0_2` final test 应达到 easy top-1 `0.60`, hard top-1 `0.45`, ambiguous hit `0.75`; 未达标时必须标记 partial/negative evidence
 
 ## 6. 关键开放问题
 
 - `OPEN-001`: 首轮 backbone 固定为 ResNet-18 还是保留 ConvNeXt-Tiny 分支
 - `OPEN-002`: 歧义样本构造优先级如何在 MixUp、叠加、遮挡之间排序
-- `OPEN-003`: pair 评估默认使用 `(resolution_ratio, content_entropy)` 还是 `(resolution_ratio, resolution_ratio * content_entropy)`
+- `OPEN-003`: v0.2 之后是否把 decision-regret 实验纳入主协议

@@ -59,7 +59,7 @@ def test_artifact_writers_create_expected_files(tmp_path: Path):
     assert summary_path.exists()
     assert "mean_proposition_truth_ratio" in summary_path.read_text(encoding="utf-8")
     assert "mean_auxiliary_top1_content_probability" in summary_path.read_text(encoding="utf-8")
-    assert "mean_resolution_weighted_content_entropy" in summary_path.read_text(encoding="utf-8")
+    assert "mean_state_weighted_content_entropy" in summary_path.read_text(encoding="utf-8")
 
 
 def test_matched_summary_and_experiment_record(tmp_path: Path):
@@ -96,7 +96,7 @@ def test_matched_summary_and_experiment_record(tmp_path: Path):
         integrity_overrides=("missing_checkpoint",),
         source_run_ids=("RUN-1",),
         source_protocol_ids=("plan_a_v1",),
-        resolved_eval_config={"primary_scalar": "completion_score_beta_0_1", "random_state": 7},
+        resolved_eval_config={"primary_scalar": "top1_completion_beta_0_1", "random_state": 7},
         proposition_diagnostic_scalar_name="proposition_truth_ratio",
         proposition_diagnostic_table_path=str(tmp_path / "proposition.csv"),
         proposition_tau_roc_curve_path=str(tmp_path / "tau_roc_curve.png"),

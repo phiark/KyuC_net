@@ -6,14 +6,23 @@ import torch
 from torch.utils.data import DataLoader
 
 from frcnet.data import BatchInput
-from frcnet.evaluation.records import DEFAULT_MODEL_FAMILY, SampleAnalysisRecord, Top1PropositionRecord
+from frcnet.evaluation.beta_policy import completion_from_view
+from frcnet.evaluation.proposition_views import proposition_view_from_mask, top1_view
+from frcnet.evaluation.records import (
+    DEFAULT_MODEL_FAMILY,
+    PropositionViewRecord,
+    SampleAnalysisRecord,
+    Top1PropositionRecord,
+)
+from frcnet.evaluation.state_metrics import (
+    state_content_entropy,
+    state_entropy,
+    state_weighted_content_entropy,
+)
 from frcnet.models import FRCNetModel, ModelOutput
 from frcnet.utils import (
-    completion_score,
-    content_entropy,
     move_batch_to_device,
     resolution_entropy,
-    resolution_weighted_content_entropy,
     ternary_entropy_from_masses,
 )
 
@@ -50,30 +59,32 @@ def build_sample_analysis_records(
     auxiliary_top1_content_probability = model_output.content_distribution.gather(
         1, predicted_class_index.unsqueeze(1)
     ).squeeze(1)
-    entropy = content_entropy(model_output.content_distribution)
-    weighted_entropy = resolution_weighted_content_entropy(model_output.resolution_ratio, entropy)
+    entropy = state_content_entropy(model_output.content_distribution)
+    weighted_entropy = state_weighted_content_entropy(model_output.resolution_ratio, entropy)
+    state_entropy_value = state_entropy(model_output.resolution_ratio, entropy)
     resolution_entropy_value = resolution_entropy(model_output.resolution_ratio)
-    score_beta_0_1 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.1)
-    score_beta_0_25 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.25)
-    score_beta_0_5 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.5)
-    score_beta_0_75 = completion_score(model_output.class_mass, model_output.unknown_mass, beta=0.75)
     top1_class_mass = model_output.class_mass.gather(1, predicted_class_index.unsqueeze(1)).squeeze(1)
+    top1_view_value = top1_view(model_output.class_mass, model_output.unknown_mass)
+    score_beta_0_1 = completion_from_view(top1_view_value.truth_mass, top1_view_value.unknown_mass, beta=0.1)
+    score_beta_0_25 = completion_from_view(top1_view_value.truth_mass, top1_view_value.unknown_mass, beta=0.25)
+    score_beta_0_5 = completion_from_view(top1_view_value.truth_mass, top1_view_value.unknown_mass, beta=0.5)
+    score_beta_0_75 = completion_from_view(top1_view_value.truth_mass, top1_view_value.unknown_mass, beta=0.75)
     proposition_target_mask = _build_proposition_target_mask(
         batch_input,
         model_output.num_classes,
         model_output.class_mass.device,
-    ).to(dtype=model_output.class_mass.dtype)
-    proposition_truth_mass = (model_output.class_mass * proposition_target_mask).sum(dim=1)
-    proposition_false_mass = (model_output.class_mass.sum(dim=1) - proposition_truth_mass).clamp_min(0.0)
-    proposition_unknown_mass = model_output.unknown_mass
-    proposition_truth_ratio = torch.zeros_like(proposition_truth_mass)
-    resolved_mass = proposition_truth_mass + proposition_false_mass
-    resolved_mask = resolved_mass > torch.finfo(resolved_mass.dtype).eps
-    proposition_truth_ratio[resolved_mask] = proposition_truth_mass[resolved_mask] / resolved_mass[resolved_mask]
+    )
+    target_view = proposition_view_from_mask(
+        view_name="target_or_candidate_view",
+        label_aware=True,
+        class_mass=model_output.class_mass,
+        unknown_mass=model_output.unknown_mass,
+        truth_mask=proposition_target_mask,
+    )
     ternary_entropy_value = ternary_entropy_from_masses(
-        proposition_truth_mass,
-        proposition_false_mass,
-        proposition_unknown_mass,
+        target_view.truth_mass,
+        target_view.false_mass,
+        target_view.unknown_mass,
     )
 
     record_list: list[SampleAnalysisRecord] = []
@@ -100,20 +111,25 @@ def build_sample_analysis_records(
                 predicted_class_index=int(predicted_class_index[index].item()),
                 resolution_ratio=float(model_output.resolution_ratio[index].item()),
                 unknown_mass=float(model_output.unknown_mass[index].item()),
-                content_entropy=float(entropy[index].item()),
-                resolution_weighted_content_entropy=float(weighted_entropy[index].item()),
+                state_content_entropy=float(entropy[index].item()),
+                state_weighted_content_entropy=float(weighted_entropy[index].item()),
+                state_entropy=float(state_entropy_value[index].item()),
                 resolution_entropy=float(resolution_entropy_value[index].item()),
                 top1_class_mass=float(top1_class_mass[index].item()),
-                proposition_truth_mass=float(proposition_truth_mass[index].item()),
-                proposition_false_mass=float(proposition_false_mass[index].item()),
-                proposition_unknown_mass=float(proposition_unknown_mass[index].item()),
-                proposition_truth_ratio=float(proposition_truth_ratio[index].item()),
+                top1_view_truth_mass=float(top1_view_value.truth_mass[index].item()),
+                top1_view_false_mass=float(top1_view_value.false_mass[index].item()),
+                top1_view_unknown_mass=float(top1_view_value.unknown_mass[index].item()),
+                top1_view_tau=float(top1_view_value.tau[index].item()),
+                proposition_truth_mass=float(target_view.truth_mass[index].item()),
+                proposition_false_mass=float(target_view.false_mass[index].item()),
+                proposition_unknown_mass=float(target_view.unknown_mass[index].item()),
+                proposition_truth_ratio=float(target_view.tau[index].item()),
                 ternary_entropy=float(ternary_entropy_value[index].item()),
                 auxiliary_top1_content_probability=float(auxiliary_top1_content_probability[index].item()),
-                completion_score_beta_0_1=float(score_beta_0_1[index].item()),
-                completion_score_beta_0_25=float(score_beta_0_25[index].item()),
-                completion_score_beta_0_5=float(score_beta_0_5[index].item()),
-                completion_score_beta_0_75=float(score_beta_0_75[index].item()),
+                top1_completion_beta_0_1=float(score_beta_0_1[index].item()),
+                top1_completion_beta_0_25=float(score_beta_0_25[index].item()),
+                top1_completion_beta_0_5=float(score_beta_0_5[index].item()),
+                top1_completion_beta_0_75=float(score_beta_0_75[index].item()),
                 candidate_class_indices=candidate_indices,
             )
         )
@@ -156,6 +172,46 @@ def build_top1_proposition_records(
             )
         )
     return proposition_records
+
+
+def build_proposition_view_records(
+    sample_analysis_records: Iterable[SampleAnalysisRecord],
+) -> list[PropositionViewRecord]:
+    proposition_view_records: list[PropositionViewRecord] = []
+    for record in sample_analysis_records:
+        proposition_view_records.append(
+            PropositionViewRecord(
+                model_family=record.model_family,
+                run_id=record.run_id,
+                protocol_id=record.protocol_id,
+                sample_id=record.sample_id,
+                split_name=record.split_name,
+                cohort_name=record.cohort_name,
+                view_name="top1_view",
+                label_aware=False,
+                proposition_truth_mass=record.top1_view_truth_mass,
+                proposition_false_mass=record.top1_view_false_mass,
+                proposition_unknown_mass=record.top1_view_unknown_mass,
+                proposition_truth_ratio=record.top1_view_tau,
+            )
+        )
+        proposition_view_records.append(
+            PropositionViewRecord(
+                model_family=record.model_family,
+                run_id=record.run_id,
+                protocol_id=record.protocol_id,
+                sample_id=record.sample_id,
+                split_name=record.split_name,
+                cohort_name=record.cohort_name,
+                view_name=f"{_proposition_target_type(record.cohort_name)}_view",
+                label_aware=True,
+                proposition_truth_mass=record.proposition_truth_mass,
+                proposition_false_mass=record.proposition_false_mass,
+                proposition_unknown_mass=record.proposition_unknown_mass,
+                proposition_truth_ratio=record.proposition_truth_ratio,
+            )
+        )
+    return proposition_view_records
 
 
 def run_inference_export(

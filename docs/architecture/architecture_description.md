@@ -164,20 +164,27 @@ input sample
 - `class_label`
 - `resolution_ratio`
 - `unknown_mass`
-- `content_entropy`
+- `state_content_entropy`
+- `state_weighted_content_entropy`
+- `state_entropy`
 - `resolution_entropy`
 - `top1_class_mass`
+- `top1_view_truth_mass`
+- `top1_view_false_mass`
+- `top1_view_unknown_mass`
+- `top1_view_tau`
 - `proposition_truth_mass`
 - `proposition_false_mass`
 - `proposition_unknown_mass`
 - `proposition_truth_ratio`
 - `ternary_entropy`
 - `auxiliary_top1_content_probability`
-- `resolution_weighted_content_entropy`
-- `completion_score_beta_0_1`
-- `completion_score_beta_0_25`
-- `completion_score_beta_0_5`
-- `completion_score_beta_0_75`
+- `top1_completion_beta_0_1`
+- `top1_completion_beta_0_25`
+- `top1_completion_beta_0_5`
+- `top1_completion_beta_0_75`
+
+`content_entropy`, `resolution_weighted_content_entropy`, and `completion_score_beta_*` are legacy aliases for reading historical records, not canonical v0.2 output fields.
 
 ### 4.4 Analysis Export Summary Contract
 
