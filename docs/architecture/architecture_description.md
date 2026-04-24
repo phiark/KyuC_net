@@ -7,7 +7,7 @@
 
 ## 1. 架构目标
 
-`next-v0.1` 保留 FRCNet 原生模型结构，把复杂度限制在可审计的评估语义层。
+`plan_a_next_v0_2` 保留 FRCNet 原生模型结构，把复杂度限制在可审计的评估语义层，并把 `next-v0.1` 的 smoke baseline 推进为 validation/final-test 分离的多 seed 研究基线。
 
 模型层:
 
@@ -39,7 +39,7 @@ completion layer:
 - `src/frcnet/data`: cohort manifest、batch contract、dataset adapter。
 - `src/frcnet/evaluation`: semantic layers、inference export、matched benchmark、matched manifest、Softmax reference。
 - `src/frcnet/analysis`: figures、tables、experiment record。
-- `src/frcnet/workflows`: single-run Plan A workflow only。
+- `src/frcnet/workflows`: single-run Plan A workflow plus constrained v0.2 study orchestration。
 
 ## 3. 当前保留的 workflow
 
@@ -48,11 +48,10 @@ completion layer:
 - export analysis records
 - generate report artifacts
 - run single end-to-end experiment bundle
+- run v0.2 multi-seed study from explicit train/validation/test configs
 
 ## 4. 当前不保留的 workflow
 
-- study-level multi-seed runner
-- aggregate report builder
 - dual checkpoint policy comparison
 - decision benchmark runner
 

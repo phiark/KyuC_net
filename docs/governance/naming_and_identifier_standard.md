@@ -58,6 +58,7 @@
 | `r H_K(c)` | resolution-weighted state entropy | `state_weighted_content_entropy` | 对 `resolution_ratio * state_content_entropy` 的显式导出 |
 | `H_res` | resolution entropy | `resolution_entropy` | 对 `resolution_ratio` 的二元熵 |
 | `H_3` | ternary entropy | `ternary_entropy` | 对显式状态求熵 |
+| top-1 proposition view | label-free top-1 view | `top1_view_*` | 可进入主 benchmark 的 proposition view |
 | auxiliary `tau` surrogate | top-1 content probability | `auxiliary_top1_content_probability` | 保留为辅助诊断量, 不再作为规范 `tau` |
 | `beta` / `β` | completion policy parameter | `completion_policy_beta` | 下游读出策略参数 |
 | `q_beta(A)` | completion score under proposition view A | `top1_completion_beta_*` | 标量读出必须绑定 view |

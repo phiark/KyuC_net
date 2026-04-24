@@ -47,7 +47,8 @@ HardMin/
 │   ├── protocol/
 │   ├── train/
 │   ├── eval/
-│   └── analysis/
+│   ├── analysis/
+│   └── study/
 ├── tests/
 │   ├── unit/
 │   ├── integration/

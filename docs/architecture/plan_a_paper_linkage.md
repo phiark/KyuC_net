@@ -7,7 +7,7 @@
 
 ## 1. 目标
 
-本文件把论文变量映射到 `next-v0.1` 的工程字段，防止 state、proposition、completion 三层再次混用。
+本文件把论文变量映射到 `plan_a_next_v0_2` 的工程字段，防止 state、proposition、completion 三层再次混用，并明确哪些 evidence 可进入主 benchmark。
 
 ## 2. 变量映射
 
@@ -45,7 +45,9 @@
 
 当前最小追踪链:
 
-`plan_a_next_v0_1_*.yaml -> plan_a_manifest.jsonl -> sample_analysis_records.csv -> top1_proposition_records.csv -> analysis_summary.json -> report artifacts`
+`plan_a_next_v0_2_{train,validation,test}.yaml -> plan_a_manifest.jsonl -> sample_analysis_records.csv -> top1_proposition_records.csv / proposition_view_records.csv -> analysis_summary.json -> frozen matched manifest -> report artifacts`
+
+v0.2 paper-facing claims must use final test output. Validation output is only for checkpoint selection.
 
 ## 5. 历史兼容
 

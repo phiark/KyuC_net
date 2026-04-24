@@ -15,9 +15,11 @@ from frcnet.data import (
 from frcnet.evaluation import (
     AnalysisExportSummary,
     DEFAULT_MODEL_FAMILY,
+    build_proposition_view_records,
     build_top1_proposition_records,
     run_inference_export,
     write_analysis_export_summary,
+    write_proposition_view_records,
     write_sample_analysis_records,
     write_top1_proposition_records,
 )
@@ -86,11 +88,16 @@ def export_plan_a_inference_bundle(
         model_family=model_family,
     )
     proposition_records = build_top1_proposition_records(sample_analysis_records)
+    proposition_view_records = build_proposition_view_records(sample_analysis_records)
 
     analysis_path = write_sample_analysis_records(sample_analysis_records, output_root / "sample_analysis_records.csv")
     proposition_path = write_top1_proposition_records(
         proposition_records,
         output_root / "top1_proposition_records.csv",
+    )
+    proposition_view_path = write_proposition_view_records(
+        proposition_view_records,
+        output_root / "proposition_view_records.csv",
     )
     analysis_summary_path = write_analysis_export_summary(
         AnalysisExportSummary(
@@ -123,6 +130,7 @@ def export_plan_a_inference_bundle(
         "manifest_snapshot_path": str(manifest_snapshot_path),
         "analysis_path": str(analysis_path),
         "proposition_path": str(proposition_path),
+        "proposition_view_path": str(proposition_view_path),
         "analysis_summary_path": str(analysis_summary_path),
         "checkpoint_selection_summary_path": ""
         if checkpoint_selection_summary_path is None
