@@ -104,10 +104,39 @@ def _distribute_count(total_count: int, num_buckets: int) -> tuple[int, ...]:
     return tuple(base_count + (1 if bucket_index < remainder else 0) for bucket_index in range(num_buckets))
 
 
-def _stable_recipe(index: int) -> tuple[str, dict[str, Any]]:
-    if index % 2 == 0:
-        return "gaussian_blur", {"kernel_size": 5, "sigma": 1.0}
-    return "low_res", {"downsample_size": 16}
+def _resolve_hard_id_recipes(protocol_config: Mapping[str, Any]) -> tuple[tuple[str, dict[str, Any]], ...]:
+    hard_id_config = protocol_config.get("hard_id", {})
+    configured_recipes = hard_id_config.get("recipes", ("gaussian_blur", "low_res"))
+    recipes: list[tuple[str, dict[str, Any]]] = []
+    for recipe_name in configured_recipes:
+        normalized_name = str(recipe_name).lower()
+        if normalized_name == "gaussian_blur":
+            recipes.append(
+                (
+                    normalized_name,
+                    {
+                        "kernel_size": int(hard_id_config.get("blur_kernel_size", 5)),
+                        "sigma": float(hard_id_config.get("blur_sigma", 1.0)),
+                    },
+                )
+            )
+        elif normalized_name == "low_res":
+            recipes.append(
+                (
+                    normalized_name,
+                    {"downsample_size": int(hard_id_config.get("low_res_size", 16))},
+                )
+            )
+        else:
+            raise ValueError(f"Unsupported hard_id recipe: {recipe_name}")
+    if not recipes:
+        raise ValueError("hard_id.recipes must include at least one recipe.")
+    return tuple(recipes)
+
+
+def _hard_id_recipe(index: int, recipes: tuple[tuple[str, dict[str, Any]], ...]) -> tuple[str, dict[str, Any]]:
+    recipe_name, parameters = recipes[index % len(recipes)]
+    return recipe_name, dict(parameters)
 
 
 def _resolve_ambiguous_recipes(protocol_config: Mapping[str, Any]) -> tuple[str, ...]:
@@ -155,6 +184,7 @@ def build_plan_a_manifest(
     ambiguous_per_pair = int(analysis_config["ambiguous_per_pair"])
     ood_count = int(analysis_config["ood_count"])
     unknown_count = int(analysis_config["unknown_supervision_count"])
+    hard_id_recipes = _resolve_hard_id_recipes(protocol_config)
 
     for class_label in range(int(protocol_config["num_classes"])):
         easy_indices = _pop_indices(cifar_indices[class_label], easy_id_per_class)
@@ -177,7 +207,7 @@ def build_plan_a_manifest(
 
         hard_indices = _pop_indices(cifar_indices[class_label], hard_id_per_class)
         for hard_offset, index in enumerate(hard_indices):
-            recipe, parameters = _stable_recipe(hard_offset)
+            recipe, parameters = _hard_id_recipe(hard_offset, hard_id_recipes)
             manifest_records.append(
                 SampleManifestRecord(
                     protocol_id=protocol_id,

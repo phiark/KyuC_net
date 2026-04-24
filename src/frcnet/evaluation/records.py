@@ -30,6 +30,10 @@ class SampleAnalysisRecord:
     state_weighted_content_entropy: float
     resolution_entropy: float
     top1_class_mass: float
+    top1_view_truth_mass: float
+    top1_view_false_mass: float
+    top1_view_unknown_mass: float
+    top1_view_tau: float
     proposition_truth_mass: float
     proposition_false_mass: float
     proposition_unknown_mass: float
@@ -43,54 +47,60 @@ class SampleAnalysisRecord:
     candidate_class_indices: tuple[int, ...] = ()
 
     @property
-    def top1_content_probability(self) -> float:
-        return self.auxiliary_top1_content_probability
-
-    @property
     def content_entropy(self) -> float:
         return self.state_content_entropy
+
+    @content_entropy.setter
+    def content_entropy(self, value: float) -> None:
+        self.state_content_entropy = value
 
     @property
     def resolution_weighted_content_entropy(self) -> float:
         return self.state_weighted_content_entropy
 
-    @property
-    def state_entropy(self) -> float:
-        return self.resolution_entropy + self.state_weighted_content_entropy
-
-    @property
-    def top1_view_truth_mass(self) -> float:
-        return self.top1_class_mass
-
-    @property
-    def top1_view_false_mass(self) -> float:
-        return max(0.0, self.resolution_ratio - self.top1_class_mass)
-
-    @property
-    def top1_view_unknown_mass(self) -> float:
-        return self.unknown_mass
-
-    @property
-    def top1_view_tau(self) -> float:
-        if self.resolution_ratio <= 0.0:
-            return 0.0
-        return max(0.0, min(1.0, self.top1_class_mass / self.resolution_ratio))
+    @resolution_weighted_content_entropy.setter
+    def resolution_weighted_content_entropy(self, value: float) -> None:
+        self.state_weighted_content_entropy = value
 
     @property
     def completion_score_beta_0_1(self) -> float:
         return self.top1_completion_beta_0_1
 
+    @completion_score_beta_0_1.setter
+    def completion_score_beta_0_1(self, value: float) -> None:
+        self.top1_completion_beta_0_1 = value
+
     @property
     def completion_score_beta_0_25(self) -> float:
         return self.top1_completion_beta_0_25
+
+    @completion_score_beta_0_25.setter
+    def completion_score_beta_0_25(self, value: float) -> None:
+        self.top1_completion_beta_0_25 = value
 
     @property
     def completion_score_beta_0_5(self) -> float:
         return self.top1_completion_beta_0_5
 
+    @completion_score_beta_0_5.setter
+    def completion_score_beta_0_5(self, value: float) -> None:
+        self.top1_completion_beta_0_5 = value
+
     @property
     def completion_score_beta_0_75(self) -> float:
         return self.top1_completion_beta_0_75
+
+    @completion_score_beta_0_75.setter
+    def completion_score_beta_0_75(self, value: float) -> None:
+        self.top1_completion_beta_0_75 = value
+
+    @property
+    def top1_content_probability(self) -> float:
+        return self.auxiliary_top1_content_probability
+
+    @property
+    def state_entropy(self) -> float:
+        return self.resolution_entropy + self.state_weighted_content_entropy
 
     def to_csv_row(self) -> dict[str, str | float | int]:
         return {
@@ -176,6 +186,38 @@ class Top1PropositionRecord:
             "ternary_entropy": self.ternary_entropy,
             "auxiliary_top1_content_probability": self.auxiliary_top1_content_probability,
             "candidate_class_indices_json": json.dumps(list(self.candidate_class_indices)),
+        }
+
+
+@dataclass(slots=True)
+class PropositionViewRecord:
+    model_family: str
+    run_id: str
+    protocol_id: str
+    sample_id: str
+    split_name: str
+    cohort_name: str
+    view_name: str
+    label_aware: bool
+    proposition_truth_mass: float
+    proposition_false_mass: float
+    proposition_unknown_mass: float
+    proposition_truth_ratio: float
+
+    def to_csv_row(self) -> dict[str, str | int | float]:
+        return {
+            "model_family": self.model_family,
+            "run_id": self.run_id,
+            "protocol_id": self.protocol_id,
+            "sample_id": self.sample_id,
+            "split_name": self.split_name,
+            "cohort_name": self.cohort_name,
+            "view_name": self.view_name,
+            "label_aware": int(self.label_aware),
+            "proposition_truth_mass": self.proposition_truth_mass,
+            "proposition_false_mass": self.proposition_false_mass,
+            "proposition_unknown_mass": self.proposition_unknown_mass,
+            "proposition_truth_ratio": self.proposition_truth_ratio,
         }
 
 
@@ -296,6 +338,22 @@ def write_top1_proposition_records(
     return output
 
 
+def write_proposition_view_records(
+    records: list[PropositionViewRecord],
+    output_path: str | Path,
+) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        fieldnames = list(records[0].to_csv_row().keys()) if records else []
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        if fieldnames:
+            writer.writeheader()
+            for record in records:
+                writer.writerow(record.to_csv_row())
+    return output
+
+
 def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisRecord]:
     records: list[SampleAnalysisRecord] = []
     with Path(input_path).open("r", encoding="utf-8", newline="") as handle:
@@ -318,6 +376,26 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
                 row,
                 "auxiliary_top1_content_probability",
                 _read_float(row, "top1_content_probability", 0.0),
+            )
+            top1_completion_beta_0_1 = _read_float(
+                row,
+                "top1_completion_beta_0_1",
+                _read_float(row, "completion_score_beta_0_1", top1_class_mass + (0.1 * unknown_mass)),
+            )
+            top1_completion_beta_0_25 = _read_float(
+                row,
+                "top1_completion_beta_0_25",
+                _read_float(row, "completion_score_beta_0_25", top1_class_mass + (0.25 * unknown_mass)),
+            )
+            top1_completion_beta_0_5 = _read_float(
+                row,
+                "top1_completion_beta_0_5",
+                _read_float(row, "completion_score_beta_0_5", top1_class_mass + (0.5 * unknown_mass)),
+            )
+            top1_completion_beta_0_75 = _read_float(
+                row,
+                "top1_completion_beta_0_75",
+                _read_float(row, "completion_score_beta_0_75", top1_class_mass + (0.75 * unknown_mass)),
             )
             (
                 fallback_truth_mass,
@@ -349,6 +427,14 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
                     state_weighted_content_entropy=weighted_content_entropy_value,
                     resolution_entropy=_read_float(row, "resolution_entropy", fallback_resolution_entropy),
                     top1_class_mass=top1_class_mass,
+                    top1_view_truth_mass=_read_float(row, "top1_view_truth_mass", top1_class_mass),
+                    top1_view_false_mass=_read_float(
+                        row,
+                        "top1_view_false_mass",
+                        max(0.0, resolution_ratio_value - top1_class_mass),
+                    ),
+                    top1_view_unknown_mass=_read_float(row, "top1_view_unknown_mass", unknown_mass),
+                    top1_view_tau=_read_float(row, "top1_view_tau", auxiliary_top1_content_probability),
                     proposition_truth_mass=_read_float(row, "proposition_truth_mass", fallback_truth_mass),
                     proposition_false_mass=_read_float(row, "proposition_false_mass", fallback_false_mass),
                     proposition_unknown_mass=_read_float(row, "proposition_unknown_mass", unknown_mass),
@@ -427,6 +513,30 @@ def read_top1_proposition_records(input_path: str | Path) -> list[Top1Propositio
                     ternary_entropy=ternary_entropy_value,
                     auxiliary_top1_content_probability=auxiliary_top1_content_probability,
                     candidate_class_indices=tuple(json.loads(row["candidate_class_indices_json"])),
+                )
+            )
+    return records
+
+
+def read_proposition_view_records(input_path: str | Path) -> list[PropositionViewRecord]:
+    records: list[PropositionViewRecord] = []
+    with Path(input_path).open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            records.append(
+                PropositionViewRecord(
+                    model_family=str(row.get("model_family", DEFAULT_MODEL_FAMILY)),
+                    run_id=row["run_id"],
+                    protocol_id=row["protocol_id"],
+                    sample_id=row["sample_id"],
+                    split_name=row["split_name"],
+                    cohort_name=row["cohort_name"],
+                    view_name=row["view_name"],
+                    label_aware=bool(int(row["label_aware"])),
+                    proposition_truth_mass=float(row["proposition_truth_mass"]),
+                    proposition_false_mass=float(row["proposition_false_mass"]),
+                    proposition_unknown_mass=float(row["proposition_unknown_mass"]),
+                    proposition_truth_ratio=float(row["proposition_truth_ratio"]),
                 )
             )
     return records

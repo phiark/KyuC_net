@@ -8,7 +8,12 @@ from torch.utils.data import DataLoader
 from frcnet.data import BatchInput
 from frcnet.evaluation.beta_policy import completion_from_masses
 from frcnet.evaluation.proposition_views import build_top1_view
-from frcnet.evaluation.records import DEFAULT_MODEL_FAMILY, SampleAnalysisRecord, Top1PropositionRecord
+from frcnet.evaluation.records import (
+    DEFAULT_MODEL_FAMILY,
+    PropositionViewRecord,
+    SampleAnalysisRecord,
+    Top1PropositionRecord,
+)
 from frcnet.evaluation.state_metrics import compute_state_metrics
 from frcnet.models import FRCNetModel, ModelOutput
 from frcnet.utils import (
@@ -104,6 +109,10 @@ def build_sample_analysis_records(
                 state_weighted_content_entropy=float(weighted_entropy[index].item()),
                 resolution_entropy=float(resolution_entropy_value[index].item()),
                 top1_class_mass=float(top1_class_mass[index].item()),
+                top1_view_truth_mass=float(top1_view.truth_mass[index].item()),
+                top1_view_false_mass=float(top1_view.false_mass[index].item()),
+                top1_view_unknown_mass=float(top1_view.unknown_mass[index].item()),
+                top1_view_tau=float(top1_view.truth_ratio[index].item()),
                 proposition_truth_mass=float(proposition_truth_mass[index].item()),
                 proposition_false_mass=float(proposition_false_mass[index].item()),
                 proposition_unknown_mass=float(proposition_unknown_mass[index].item()),
@@ -156,6 +165,46 @@ def build_top1_proposition_records(
             )
         )
     return proposition_records
+
+
+def build_proposition_view_records(
+    sample_analysis_records: Iterable[SampleAnalysisRecord],
+) -> list[PropositionViewRecord]:
+    proposition_view_records: list[PropositionViewRecord] = []
+    for record in sample_analysis_records:
+        proposition_view_records.append(
+            PropositionViewRecord(
+                model_family=record.model_family,
+                run_id=record.run_id,
+                protocol_id=record.protocol_id,
+                sample_id=record.sample_id,
+                split_name=record.split_name,
+                cohort_name=record.cohort_name,
+                view_name="top1_view",
+                label_aware=False,
+                proposition_truth_mass=record.top1_view_truth_mass,
+                proposition_false_mass=record.top1_view_false_mass,
+                proposition_unknown_mass=record.top1_view_unknown_mass,
+                proposition_truth_ratio=record.top1_view_tau,
+            )
+        )
+        proposition_view_records.append(
+            PropositionViewRecord(
+                model_family=record.model_family,
+                run_id=record.run_id,
+                protocol_id=record.protocol_id,
+                sample_id=record.sample_id,
+                split_name=record.split_name,
+                cohort_name=record.cohort_name,
+                view_name=f"{_proposition_target_type(record.cohort_name)}_view",
+                label_aware=True,
+                proposition_truth_mass=record.proposition_truth_mass,
+                proposition_false_mass=record.proposition_false_mass,
+                proposition_unknown_mass=record.proposition_unknown_mass,
+                proposition_truth_ratio=record.proposition_truth_ratio,
+            )
+        )
+    return proposition_view_records
 
 
 def run_inference_export(

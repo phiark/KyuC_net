@@ -186,6 +186,23 @@ def _build_scalar_features(
     return np.array([float(getattr(record, resolved_scalar_name)) for record in records], dtype=np.float64)
 
 
+def _scalar_auc_bundle(
+    scalar_features: np.ndarray,
+    labels: np.ndarray,
+    train_index: np.ndarray,
+    test_index: np.ndarray,
+    *,
+    random_state: int,
+) -> tuple[float, float, float]:
+    raw_auc = float(roc_auc_score(labels[test_index], scalar_features[test_index]))
+    oriented_auc = max(raw_auc, 1.0 - raw_auc)
+    classifier = LogisticRegression(random_state=random_state, max_iter=1000)
+    classifier.fit(scalar_features[train_index].reshape(-1, 1), labels[train_index])
+    scalar_probability = classifier.predict_proba(scalar_features[test_index].reshape(-1, 1))[:, 1]
+    one_feature_logistic_auc = float(roc_auc_score(labels[test_index], scalar_probability))
+    return raw_auc, oriented_auc, one_feature_logistic_auc
+
+
 def _prepare_matched_records(
     sample_analysis_records: list[SampleAnalysisRecord],
     *,
@@ -243,6 +260,50 @@ def _prepare_matched_records(
         random_state=random_state,
         stratify=labels,
     )
+    return ordered_records, labels, test_index
+
+
+def _prepare_frozen_matched_records(
+    sample_analysis_records: list[SampleAnalysisRecord],
+    *,
+    matched_manifest_records: Sequence[MatchedManifestRecord],
+    positive_cohort: str,
+    negative_cohort: str,
+    test_size: float,
+    random_state: int,
+) -> tuple[list[SampleAnalysisRecord], np.ndarray, np.ndarray]:
+    record_by_id = {record.sample_id: record for record in sample_analysis_records}
+    selected_manifest = [
+        record
+        for record in matched_manifest_records
+        if record.cohort_name in {positive_cohort, negative_cohort} and record.sample_id in record_by_id
+    ]
+    if not selected_manifest:
+        raise ValueError("Frozen matched manifest did not match any sample_analysis_records.")
+    selected_manifest = sorted(
+        selected_manifest,
+        key=lambda record: (record.paired_group_id, record.cohort_name, record.sample_id),
+    )
+    ordered_records = [record_by_id[record.sample_id] for record in selected_manifest]
+    labels = np.array([1 if record.cohort_name == positive_cohort else 0 for record in selected_manifest], dtype=np.int64)
+    if len(set(labels.tolist())) != 2:
+        raise ValueError("Frozen matched manifest must include both positive and negative cohorts.")
+
+    test_index = np.array(
+        [
+            index
+            for index, record in enumerate(selected_manifest)
+            if record.manifest_role in {"test", "eval_only"}
+        ],
+        dtype=np.int64,
+    )
+    if test_index.size == 0 or test_index.size == labels.shape[0]:
+        _, test_index = train_test_split(
+            np.arange(labels.shape[0]),
+            test_size=test_size,
+            random_state=random_state,
+            stratify=labels,
+        )
     return ordered_records, labels, test_index
 
 
@@ -309,6 +370,7 @@ def summarize_scalar_benchmarks(
             unique_scalar_names.append(scalar_name)
 
     summaries: list[ScalarBenchmarkSummary] = []
+    train_index = np.setdiff1d(np.arange(labels.shape[0]), test_index, assume_unique=True)
     for scalar_name in unique_scalar_names:
         scalar_features = _build_scalar_features(
             ordered_records,

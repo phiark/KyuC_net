@@ -1,6 +1,7 @@
 """Evaluation components for FRCNet."""
 
 from frcnet.evaluation.inference import (
+    build_proposition_view_records,
     build_sample_analysis_records,
     build_top1_proposition_records,
     run_inference_export,
@@ -45,12 +46,15 @@ from frcnet.evaluation.proposition_views import (
 from frcnet.evaluation.records import (
     AnalysisExportSummary,
     DEFAULT_MODEL_FAMILY,
+    PropositionViewRecord,
     SampleAnalysisRecord,
     Top1PropositionRecord,
     read_analysis_export_summary,
+    read_proposition_view_records,
     read_sample_analysis_records,
     read_top1_proposition_records,
     write_analysis_export_summary,
+    write_proposition_view_records,
     write_sample_analysis_records,
     write_top1_proposition_records,
 )
@@ -76,6 +80,7 @@ __all__ = [
     "MatchedBenchmarkSummary",
     "MatchedManifestRecord",
     "PropositionView",
+    "PropositionViewRecord",
     "PropositionViewSpec",
     "ReferenceScoreRecord",
     "SampleAnalysisRecord",
@@ -89,6 +94,7 @@ __all__ = [
     "build_empty_view",
     "build_frozen_matched_manifest",
     "build_scalar_roc_curve",
+    "build_proposition_view_records",
     "build_sample_analysis_records",
     "build_target_view",
     "build_top1_proposition_records",
@@ -98,6 +104,7 @@ __all__ = [
     "compute_state_metrics",
     "read_matched_manifest_jsonl",
     "read_analysis_export_summary",
+    "read_proposition_view_records",
     "read_reference_score_records",
     "read_sample_analysis_records",
     "read_top1_proposition_records",
@@ -115,6 +122,7 @@ __all__ = [
     "write_reference_score_records",
     "write_scalar_benchmark_summaries",
     "write_analysis_export_summary",
+    "write_proposition_view_records",
     "write_sample_analysis_records",
     "write_top1_proposition_records",
 ]
