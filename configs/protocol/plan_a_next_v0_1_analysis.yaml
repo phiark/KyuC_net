@@ -14,14 +14,14 @@ protocol:
       split: test
       download: false
   analysis:
-    easy_id_per_class: 4
-    hard_id_per_class: 4
-    ambiguous_per_pair: 4
-    ood_count: 12
-    unknown_supervision_count: 12
+    easy_id_per_class: 200
+    hard_id_per_class: 200
+    ambiguous_per_pair: 200
+    ood_count: 1000
+    unknown_supervision_count: 1000
     dataloader:
-      batch_size: 8
-      drop_last: true
+      batch_size: 64
+      drop_last: false
       num_workers: 0
   ambiguous:
     recipe: mixup
