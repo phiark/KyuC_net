@@ -175,6 +175,52 @@ def test_train_plan_a_model_writes_records_and_checkpoints(tmp_path: Path, monke
     assert len(summary_payload["epochs"]) == 2
 
 
+def test_train_plan_a_model_supports_phased_curriculum(tmp_path: Path, monkeypatch):
+    train_payload = _build_train_payload(tmp_path, epochs=99)
+    train_payload["training"] = {
+        "seed": 7,
+        "phases": [
+            {
+                "name": "warmup",
+                "epoch_count": 1,
+                "enabled_cohorts": ["easy_id", "unknown_supervision"],
+                "lr_scale": 1.0,
+                "loss_overrides": {"weight_unknown": 0.5},
+            },
+            {
+                "name": "main",
+                "epoch_count": 1,
+                "enabled_cohorts": ["easy_id", "hard_id", "ambiguous_id", "unknown_supervision"],
+                "lr_scale": 0.25,
+                "loss_overrides": {"weight_ambiguous": 1.2},
+            },
+        ],
+    }
+    protocol_config_path = _write_yaml(
+        tmp_path / "protocol_train.yaml",
+        "protocol",
+        _build_protocol("train", cifar_train=True, svhn_split="train"),
+    )
+    model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
+    train_config_path = _write_yaml(tmp_path / "train.yaml", "train", train_payload)
+
+    _patch_fake_source_datasets(monkeypatch)
+
+    outputs = train_plan_a_model(
+        protocol_config_path=protocol_config_path,
+        model_config_path=model_config_path,
+        train_config_path=train_config_path,
+        output_dir=tmp_path / "train_run",
+        run_id="RUN-PHASED-TEST",
+    )
+
+    summary_payload = json.loads(Path(outputs["summary_path"]).read_text(encoding="utf-8"))
+    assert [epoch_payload["phase_name"] for epoch_payload in summary_payload["epochs"]] == ["warmup", "main"]
+    assert [epoch_payload["learning_rate"] for epoch_payload in summary_payload["epochs"]] == [0.01, 0.0025]
+    assert [phase["name"] for phase in summary_payload["training_schedule"]] == ["warmup", "main"]
+    assert summary_payload["training_schedule"][0]["enabled_cohorts"] == ["easy_id", "unknown_supervision"]
+
+
 def test_train_plan_a_model_uses_validation_for_single_best_checkpoint(tmp_path: Path, monkeypatch):
     train_protocol = _build_protocol("train", cifar_train=True, svhn_split="train")
     validation_protocol = _build_protocol("validation", cifar_train=False, svhn_split="test")

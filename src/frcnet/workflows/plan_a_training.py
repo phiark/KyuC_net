@@ -149,6 +149,59 @@ def _best_rank(
     )
 
 
+def _set_optimizer_learning_rate(optimizer: torch.optim.Optimizer, learning_rate: float) -> None:
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = learning_rate
+
+
+def _resolve_training_phases(training_config: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_phases = training_config.get("phases")
+    if raw_phases is None:
+        total_epoch_count = int(training_config.get("epochs", 1))
+        if total_epoch_count <= 0:
+            raise ValueError("train.training.epochs must be positive.")
+        return [
+            {
+                "name": "train",
+                "epoch_count": total_epoch_count,
+                "enabled_cohorts": sorted(TRAINABLE_COHORT_NAMES),
+                "lr_scale": 1.0,
+                "loss_overrides": {},
+            }
+        ]
+
+    if not isinstance(raw_phases, list) or not raw_phases:
+        raise ValueError("train.training.phases must be a non-empty list.")
+
+    phases: list[dict[str, Any]] = []
+    for phase_index, phase_config in enumerate(raw_phases, start=1):
+        phase_name = str(phase_config.get("name", f"phase_{phase_index}"))
+        epoch_count = int(phase_config.get("epoch_count", 0))
+        if epoch_count <= 0:
+            raise ValueError(f"train.training.phases[{phase_index}].epoch_count must be positive.")
+        enabled_cohorts = tuple(str(value) for value in phase_config.get("enabled_cohorts", sorted(TRAINABLE_COHORT_NAMES)))
+        invalid_cohorts = sorted(set(enabled_cohorts) - set(TRAINABLE_COHORT_NAMES))
+        if invalid_cohorts:
+            raise ValueError(
+                f"train.training.phases[{phase_index}].enabled_cohorts contains unsupported cohorts: {invalid_cohorts}"
+            )
+        if not enabled_cohorts:
+            raise ValueError(f"train.training.phases[{phase_index}].enabled_cohorts must not be empty.")
+        lr_scale = float(phase_config.get("lr_scale", 1.0))
+        if lr_scale <= 0.0:
+            raise ValueError(f"train.training.phases[{phase_index}].lr_scale must be positive.")
+        phases.append(
+            {
+                "name": phase_name,
+                "epoch_count": epoch_count,
+                "enabled_cohorts": enabled_cohorts,
+                "lr_scale": lr_scale,
+                "loss_overrides": dict(phase_config.get("loss_overrides", {})),
+            }
+        )
+    return phases
+
+
 def train_plan_a_model(
     *,
     protocol_config_path: str | Path,
@@ -233,40 +286,64 @@ def train_plan_a_model(
         model.load_state_dict(state_dict)
 
     training_config = dict(train_config.get("training", {}))
-    total_epoch_count = int(training_config.get("epochs", 1))
-    if total_epoch_count <= 0:
-        raise ValueError("train.training.epochs must be positive.")
-    if "phases" in training_config:
-        raise ValueError("Phased training is not supported in next-v0.1.")
-
+    training_phases = _resolve_training_phases(training_config)
+    total_epoch_count = sum(int(phase["epoch_count"]) for phase in training_phases)
     checkpoint_config = dict(train_config.get("checkpointing", {}))
     save_every_epochs = int(checkpoint_config.get("save_every_epochs", 1))
-    loss_config = dict(train_config.get("loss", {}))
+    base_loss_config = dict(train_config.get("loss", {}))
     dataloader_config = dict(protocol_config.get("analysis", {}).get("dataloader", {}))
     dataloader_config.update(train_config.get("dataloader", {}))
     model_family = str(train_config.get("model_family", DEFAULT_MODEL_FAMILY))
 
-    train_dataloader = _build_manifest_dataloader(
-        manifest_records=train_manifest_records,
-        source_datasets=source_datasets,
-        num_classes=int(protocol_config["num_classes"]),
-        dataloader_config=dataloader_config,
-        runtime_config=runtime_config,
-        runtime_spec=runtime_spec,
-        model=model,
-        generator_seed=seed,
-    )
-    if len(train_dataloader) == 0:
-        raise ValueError("Training dataloader resolved to zero batches.")
+    phase_runtimes: list[dict[str, Any]] = []
+    for phase_index, phase in enumerate(training_phases):
+        phase_records = _filter_manifest_records_by_cohorts(train_manifest_records, phase["enabled_cohorts"])
+        if not phase_records:
+            raise ValueError(f"Training phase `{phase['name']}` does not contain any records.")
+        phase_dataloader = _build_manifest_dataloader(
+            manifest_records=phase_records,
+            source_datasets=source_datasets,
+            num_classes=int(protocol_config["num_classes"]),
+            dataloader_config=dataloader_config,
+            runtime_config=runtime_config,
+            runtime_spec=runtime_spec,
+            model=model,
+            generator_seed=seed + phase_index,
+        )
+        if len(phase_dataloader) == 0:
+            raise ValueError(f"Training dataloader for phase `{phase['name']}` resolved to zero batches.")
+        phase_loss_config = dict(base_loss_config)
+        phase_loss_config.update(phase["loss_overrides"])
+        phase_runtimes.append(
+            {
+                **phase,
+                "records": phase_records,
+                "dataloader": phase_dataloader,
+                "learning_rate": learning_rate * float(phase["lr_scale"]),
+                "loss_config": phase_loss_config,
+            }
+        )
     _emit_progress(
         progress_callback,
         (
             f"[train] epochs={total_epoch_count} "
-            f"cohorts={','.join(sorted(TRAINABLE_COHORT_NAMES))} "
+            f"phases={','.join(str(phase['name']) for phase in phase_runtimes)} "
             f"records={len(train_manifest_records)} "
-            f"batches={len(train_dataloader)}"
+            f"batches={sum(len(phase['dataloader']) * int(phase['epoch_count']) for phase in phase_runtimes)}"
         ),
     )
+    for phase in phase_runtimes:
+        _emit_progress(
+            progress_callback,
+            (
+                f"[train] phase={phase['name']} "
+                f"epochs={phase['epoch_count']} "
+                f"lr={phase['learning_rate']:.6f} "
+                f"cohorts={','.join(phase['enabled_cohorts'])} "
+                f"records={len(phase['records'])} "
+                f"batches_per_epoch={len(phase['dataloader'])}"
+            ),
+        )
 
     validation_manifest_snapshot_path: Path | None = None
     validation_manifest_summary_path: Path | None = None
@@ -331,40 +408,54 @@ def train_plan_a_model(
     last_epoch_summary: TrainEpochSummary | None = None
     last_validation_summary: ValidationEpochSummary | None = None
 
-    for epoch in range(1, total_epoch_count + 1):
-        epoch_summary = _run_training_epoch(
-            epoch=epoch,
-            total_epoch_count=total_epoch_count,
-            phase_name="train",
-            learning_rate=learning_rate,
-            model=model,
-            dataloader=train_dataloader,
-            optimizer=optimizer,
-            runtime_spec=runtime_spec,
-            loss_config=loss_config,
-            progress_callback=progress_callback,
-        )
-        epoch_history.append(epoch_summary)
-
-        validation_summary: ValidationEpochSummary | None = None
-        if validation_dataloader is not None:
-            validation_summary = _evaluate_validation_epoch(
+    epoch = 0
+    for phase in phase_runtimes:
+        _set_optimizer_learning_rate(optimizer, float(phase["learning_rate"]))
+        for _ in range(int(phase["epoch_count"])):
+            epoch += 1
+            epoch_summary = _run_training_epoch(
                 epoch=epoch,
-                phase_name="train",
+                total_epoch_count=total_epoch_count,
+                phase_name=str(phase["name"]),
+                learning_rate=float(phase["learning_rate"]),
                 model=model,
-                dataloader=validation_dataloader,
+                dataloader=phase["dataloader"],
+                optimizer=optimizer,
                 runtime_spec=runtime_spec,
-                run_id=resolved_run_id,
-                protocol_id=validation_protocol_id or protocol_config["protocol_id"],
-                resolved_eval_config=resolved_eval_config,
+                loss_config=phase["loss_config"],
+                progress_callback=progress_callback,
             )
-            validation_history.append(validation_summary)
-        last_epoch_summary = epoch_summary
-        last_validation_summary = validation_summary
+            epoch_history.append(epoch_summary)
 
-        if save_every_epochs > 0 and (epoch % save_every_epochs == 0):
+            validation_summary: ValidationEpochSummary | None = None
+            if validation_dataloader is not None:
+                validation_summary = _evaluate_validation_epoch(
+                    epoch=epoch,
+                    phase_name=str(phase["name"]),
+                    model=model,
+                    dataloader=validation_dataloader,
+                    runtime_spec=runtime_spec,
+                    run_id=resolved_run_id,
+                    protocol_id=validation_protocol_id or protocol_config["protocol_id"],
+                    resolved_eval_config=resolved_eval_config,
+                )
+                validation_history.append(validation_summary)
+            last_epoch_summary = epoch_summary
+            last_validation_summary = validation_summary
+
+            if save_every_epochs > 0 and (epoch % save_every_epochs == 0):
+                _save_checkpoint(
+                    checkpoints_dir / f"checkpoint_epoch_{epoch:03d}.pt",
+                    run_id=resolved_run_id,
+                    epoch=epoch,
+                    protocol_id=protocol_config["protocol_id"],
+                    model=model,
+                    optimizer=optimizer,
+                    epoch_summary=epoch_summary,
+                    validation_summary=validation_summary,
+                )
             _save_checkpoint(
-                checkpoints_dir / f"checkpoint_epoch_{epoch:03d}.pt",
+                last_checkpoint_path,
                 run_id=resolved_run_id,
                 epoch=epoch,
                 protocol_id=protocol_config["protocol_id"],
@@ -373,58 +464,49 @@ def train_plan_a_model(
                 epoch_summary=epoch_summary,
                 validation_summary=validation_summary,
             )
-        _save_checkpoint(
-            last_checkpoint_path,
-            run_id=resolved_run_id,
-            epoch=epoch,
-            protocol_id=protocol_config["protocol_id"],
-            model=model,
-            optimizer=optimizer,
-            epoch_summary=epoch_summary,
-            validation_summary=validation_summary,
-        )
 
-        epoch_message = (
-            f"[train] epoch={epoch}/{total_epoch_count} "
-            f"lr={learning_rate:.6f} "
-            f"loss_total={epoch_summary.mean_loss_total:.4f} "
-            f"loss_id={epoch_summary.mean_loss_id:.4f} "
-            f"loss_unknown={epoch_summary.mean_loss_unknown:.4f} "
-            f"loss_ambiguous={epoch_summary.mean_loss_ambiguous:.4f}"
-        )
-        if validation_summary is not None:
-            epoch_message += (
-                f" val_pair={validation_summary.pair_auroc:.4f}"
-                f" val_easy_top1={validation_summary.easy_id_top1_accuracy:.4f}"
-                f" val_hard_top1={validation_summary.hard_id_top1_accuracy:.4f}"
-                f" val_amb_hit={validation_summary.ambiguous_candidate_hit_rate:.4f}"
+            epoch_message = (
+                f"[train] epoch={epoch}/{total_epoch_count} "
+                f"phase={phase['name']} "
+                f"lr={epoch_summary.learning_rate:.6f} "
+                f"loss_total={epoch_summary.mean_loss_total:.4f} "
+                f"loss_id={epoch_summary.mean_loss_id:.4f} "
+                f"loss_unknown={epoch_summary.mean_loss_unknown:.4f} "
+                f"loss_ambiguous={epoch_summary.mean_loss_ambiguous:.4f}"
             )
-        _emit_progress(progress_callback, epoch_message)
+            if validation_summary is not None:
+                epoch_message += (
+                    f" val_pair={validation_summary.pair_auroc:.4f}"
+                    f" val_easy_top1={validation_summary.easy_id_top1_accuracy:.4f}"
+                    f" val_hard_top1={validation_summary.hard_id_top1_accuracy:.4f}"
+                    f" val_amb_hit={validation_summary.ambiguous_candidate_hit_rate:.4f}"
+                )
+            _emit_progress(progress_callback, epoch_message)
 
-        candidate_rank = _best_rank(epoch_summary=epoch_summary, validation_summary=validation_summary)
-        if best_rank is None or candidate_rank > best_rank:
-            best_rank = candidate_rank
-            best_epoch_summary = epoch_summary
-            best_validation_summary = validation_summary
-            _save_checkpoint(
-                best_checkpoint_path,
-                run_id=resolved_run_id,
-                epoch=epoch,
-                protocol_id=protocol_config["protocol_id"],
-                model=model,
-                optimizer=optimizer,
-                epoch_summary=epoch_summary,
-                validation_summary=validation_summary,
-            )
-            selection_rule = (
-                "validation_pair_auroc_then_easy_id_top1_then_train_mean_loss"
-                if validation_summary is not None
-                else "train_mean_loss_total"
-            )
-            _emit_progress(
-                progress_callback,
-                f"[train] best_checkpoint_updated epoch={epoch} criterion={selection_rule}",
-            )
+            candidate_rank = _best_rank(epoch_summary=epoch_summary, validation_summary=validation_summary)
+            if best_rank is None or candidate_rank > best_rank:
+                best_rank = candidate_rank
+                best_epoch_summary = epoch_summary
+                best_validation_summary = validation_summary
+                _save_checkpoint(
+                    best_checkpoint_path,
+                    run_id=resolved_run_id,
+                    epoch=epoch,
+                    protocol_id=protocol_config["protocol_id"],
+                    model=model,
+                    optimizer=optimizer,
+                    epoch_summary=epoch_summary,
+                    validation_summary=validation_summary,
+                )
+                selection_rule = (
+                    "validation_pair_auroc_then_easy_id_top1_then_train_mean_loss"
+                    if validation_summary is not None
+                    else "train_mean_loss_total"
+                )
+                _emit_progress(
+                    progress_callback,
+                    f"[train] best_checkpoint_updated epoch={epoch} criterion={selection_rule}",
+                )
 
     if best_epoch_summary is None or last_epoch_summary is None:
         raise RuntimeError("Training completed without recording any epoch.")
@@ -519,6 +601,19 @@ def train_plan_a_model(
             },
             "epochs": [record.to_csv_row() for record in epoch_history],
             "validation_epochs": [record.to_csv_row() for record in validation_history],
+            "training_schedule": [
+                {
+                    "name": str(phase["name"]),
+                    "epoch_count": int(phase["epoch_count"]),
+                    "enabled_cohorts": list(phase["enabled_cohorts"]),
+                    "lr_scale": float(phase["lr_scale"]),
+                    "learning_rate": float(phase["learning_rate"]),
+                    "loss_overrides": dict(phase["loss_overrides"]),
+                    "num_records": len(phase["records"]),
+                    "batches_per_epoch": len(phase["dataloader"]),
+                }
+                for phase in phase_runtimes
+            ],
         },
         records_dir / "train_summary.json",
     )
