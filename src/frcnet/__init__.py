@@ -15,11 +15,13 @@ from frcnet.data import (
 )
 from frcnet.evaluation import (
     MatchedBenchmarkSummary,
+    MatchedManifestBinDiagnostic,
     MatchedManifestRecord,
     SampleAnalysisRecord,
     SoftmaxReferenceModel,
     Top1PropositionRecord,
     build_frozen_matched_manifest,
+    build_frozen_matched_manifest_with_diagnostics,
     build_top1_proposition_records,
     compute_state_metrics,
     read_sample_analysis_records,
@@ -28,6 +30,8 @@ from frcnet.evaluation import (
     run_softmax_reference_train_epoch,
     summarize_matched_ambiguous_vs_ood,
     write_matched_benchmark_summary,
+    write_matched_manifest,
+    write_matched_manifest_bin_diagnostics,
     write_matched_manifest_jsonl,
     write_sample_analysis_records,
     write_top1_proposition_records,
@@ -51,6 +55,7 @@ __all__ = [
     "LossBreakdown",
     "ManifestBackedVisionDataset",
     "MatchedBenchmarkSummary",
+    "MatchedManifestBinDiagnostic",
     "MatchedManifestRecord",
     "ModelOutput",
     "PropositionViewRecord",
@@ -60,6 +65,7 @@ __all__ = [
     "SoftmaxReferenceModel",
     "Top1PropositionRecord",
     "build_frozen_matched_manifest",
+    "build_frozen_matched_manifest_with_diagnostics",
     "build_plan_a_manifest",
     "build_proposition_view_records",
     "build_top1_proposition_records",
@@ -88,9 +94,11 @@ __all__ = [
     "validate_manifest_records",
     "write_manifest_jsonl",
     "write_matched_benchmark_summary",
+    "write_matched_manifest",
+    "write_matched_manifest_bin_diagnostics",
     "write_matched_manifest_jsonl",
     "write_sample_analysis_records",
     "write_top1_proposition_records",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"

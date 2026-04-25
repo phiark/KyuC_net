@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import csv
+import json
 
 import torch
 import torch.nn as nn
@@ -35,20 +36,55 @@ class ReferenceScoreRecord:
     sample_id: str
     reference_score_name: str
     reference_score_value: float
+    split_name: str = ""
+    cohort_name: str = ""
+    source_dataset_name: str = ""
+    reference_model_family: str = SOFTMAX_REFERENCE_FAMILY
+    reference_run_id: str = ""
     model_family: str = SOFTMAX_REFERENCE_FAMILY
 
     def to_csv_row(self) -> dict[str, str | float]:
         return {
             "sample_id": self.sample_id,
+            "split_name": self.split_name,
+            "cohort_name": self.cohort_name,
+            "source_dataset_name": self.source_dataset_name,
+            "reference_model_family": self.reference_model_family,
+            "reference_run_id": self.reference_run_id,
             "reference_score_name": self.reference_score_name,
             "reference_score_value": self.reference_score_value,
             "model_family": self.model_family,
         }
 
+    def to_dict(self) -> dict[str, str | float]:
+        return self.to_csv_row()
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> "ReferenceScoreRecord":
+        model_family = str(payload.get("model_family", payload.get("reference_model_family", SOFTMAX_REFERENCE_FAMILY)))
+        reference_model_family = str(payload.get("reference_model_family", model_family))
+        return cls(
+            sample_id=str(payload["sample_id"]),
+            split_name=str(payload.get("split_name", "")),
+            cohort_name=str(payload.get("cohort_name", "")),
+            source_dataset_name=str(payload.get("source_dataset_name", "")),
+            reference_model_family=reference_model_family,
+            reference_run_id=str(payload.get("reference_run_id", "")),
+            reference_score_name=str(payload["reference_score_name"]),
+            reference_score_value=float(payload["reference_score_value"]),
+            model_family=model_family,
+        )
+
 
 def _softmax_entropy(probability: torch.Tensor) -> torch.Tensor:
     safe_probability = probability.clamp_min(torch.finfo(probability.dtype).eps)
     return -(safe_probability * torch.log(safe_probability)).sum(dim=1)
+
+
+def softmax_entropy_reference_scores(logits: torch.Tensor) -> torch.Tensor:
+    if logits.ndim != 2:
+        raise ValueError("logits must be a 2D tensor.")
+    return _softmax_entropy(torch.softmax(logits, dim=1))
 
 
 def reference_scores_from_logits(
@@ -73,6 +109,8 @@ def reference_scores_from_logits(
             sample_id=sample_id,
             reference_score_name=score_name,
             reference_score_value=float(value.item()),
+            reference_model_family=SOFTMAX_REFERENCE_FAMILY,
+            model_family=SOFTMAX_REFERENCE_FAMILY,
         )
         for sample_id, value in zip(sample_ids, values, strict=True)
     ]
@@ -119,13 +157,33 @@ def run_softmax_reference_export(
         for batch_input in dataloader:
             batch_on_device = move_batch_to_device(batch_input, runtime_spec)
             logits = model(batch_on_device.image)
-            records.extend(reference_scores_from_logits(logits, batch_on_device.sample_id, score_name=score_name))
+            batch_records = reference_scores_from_logits(logits, batch_on_device.sample_id, score_name=score_name)
+            for index, record in enumerate(batch_records):
+                records.append(
+                    ReferenceScoreRecord(
+                        sample_id=record.sample_id,
+                        split_name=batch_on_device.split_name[index],
+                        cohort_name=batch_on_device.cohort_name[index],
+                        source_dataset_name=batch_on_device.source_dataset_name[index],
+                        reference_model_family=record.reference_model_family,
+                        reference_run_id=record.reference_run_id,
+                        reference_score_name=record.reference_score_name,
+                        reference_score_value=record.reference_score_value,
+                        model_family=record.model_family,
+                    )
+                )
     return records
 
 
 def write_reference_score_records(records: list[ReferenceScoreRecord], output_path: str | Path) -> Path:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
+    if output.suffix == ".jsonl":
+        with output.open("w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record.to_dict(), sort_keys=True))
+                handle.write("\n")
+        return output
     with output.open("w", encoding="utf-8", newline="") as handle:
         fieldnames = list(records[0].to_csv_row().keys()) if records else []
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -137,16 +195,18 @@ def write_reference_score_records(records: list[ReferenceScoreRecord], output_pa
 
 
 def read_reference_score_records(input_path: str | Path) -> list[ReferenceScoreRecord]:
+    path = Path(input_path)
+    if path.suffix == ".jsonl":
+        records: list[ReferenceScoreRecord] = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if line:
+                    records.append(ReferenceScoreRecord.from_dict(json.loads(line)))
+        return records
     records: list[ReferenceScoreRecord] = []
-    with Path(input_path).open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
-            records.append(
-                ReferenceScoreRecord(
-                    sample_id=row["sample_id"],
-                    reference_score_name=row["reference_score_name"],
-                    reference_score_value=float(row["reference_score_value"]),
-                    model_family=row.get("model_family", SOFTMAX_REFERENCE_FAMILY),
-                )
-            )
+            records.append(ReferenceScoreRecord.from_dict(dict(row)))
     return records

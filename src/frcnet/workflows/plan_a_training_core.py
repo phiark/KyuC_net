@@ -273,6 +273,7 @@ def _evaluate_validation_epoch(
         negative_cohort=str(resolved_eval_config["negative_cohort"]),
         primary_pair=str(resolved_eval_config["primary_pair"]),
         weighted_pair=str(resolved_eval_config["weighted_pair"]),
+        secondary_pair=str(resolved_eval_config["secondary_pair"]),
         primary_scalar=str(resolved_eval_config["primary_scalar"]),
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),

@@ -255,6 +255,7 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
             "negative_cohort": "ood",
             "primary_pair": "resolution_ratio__state_content_entropy",
             "weighted_pair": "resolution_ratio__state_weighted_content_entropy",
+            "secondary_pair": "resolution_ratio__state_weighted_content_entropy",
             "primary_scalar": "top1_completion_beta_0_1",
             "tau_scalar_name": "proposition_truth_ratio",
             "completion_scan_scalars": (
@@ -264,6 +265,7 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
                 "top1_completion_beta_0_75",
             ),
             "matched_manifest_path": "",
+            "require_matched_manifest": False,
             "emit_proposition_diagnostics": True,
             "test_size": 0.3,
             "random_state": 7,
@@ -286,10 +288,17 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
         "weighted_pair": str(
             eval_config.get("weighted_pair", "resolution_ratio__state_weighted_content_entropy")
         ),
+        "secondary_pair": str(
+            eval_config.get(
+                "secondary_pair",
+                eval_config.get("weighted_pair", "resolution_ratio__state_weighted_content_entropy"),
+            )
+        ),
         "primary_scalar": str(eval_config.get("primary_scalar", "top1_completion_beta_0_1")),
         "tau_scalar_name": str(eval_config.get("tau_scalar_name", "proposition_truth_ratio")),
         "completion_scan_scalars": tuple(str(value) for value in completion_scan_scalars),
         "matched_manifest_path": str(eval_config.get("matched_manifest_path", "")),
+        "require_matched_manifest": bool(eval_config.get("require_matched_manifest", False)),
         "emit_proposition_diagnostics": bool(eval_config.get("emit_proposition_diagnostics", True)),
         "test_size": float(eval_config.get("test_size", 0.3)),
         "random_state": int(eval_config.get("random_state", 7)),

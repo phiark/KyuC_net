@@ -40,6 +40,26 @@ from frcnet.workflows.workflow_io import (
 )
 
 
+def _read_optional_matched_manifest(resolved_eval_config: dict) -> tuple | None:
+    matched_manifest_path_value = str(resolved_eval_config.get("matched_manifest_path", ""))
+    require_matched_manifest = bool(resolved_eval_config.get("require_matched_manifest", False))
+    if not matched_manifest_path_value:
+        if require_matched_manifest:
+            raise ValueError("matched_manifest_path is required when require_matched_manifest=true.")
+        return None
+    matched_manifest_path = Path(matched_manifest_path_value)
+    if not matched_manifest_path.is_absolute():
+        matched_manifest_path = Path.cwd() / matched_manifest_path
+    if not matched_manifest_path.exists():
+        if require_matched_manifest:
+            raise ValueError(f"matched_manifest_path does not exist: {matched_manifest_path}")
+        return None
+    matched_manifest_records = tuple(read_matched_manifest_jsonl(matched_manifest_path))
+    if require_matched_manifest and not matched_manifest_records:
+        raise ValueError(f"matched_manifest_path is empty: {matched_manifest_path}")
+    return matched_manifest_records
+
+
 def generate_plan_a_artifact_bundle(
     *,
     analysis_path: str | Path,
@@ -200,19 +220,14 @@ def generate_plan_a_artifact_bundle(
         sample_analysis_records,
         output_root / analysis_config.get("cohort_summary_table_name", "cohort_summary_table.csv"),
     )
-    matched_manifest_records = None
-    matched_manifest_path_value = str(resolved_eval_config.get("matched_manifest_path", ""))
-    if matched_manifest_path_value:
-        matched_manifest_path = Path(matched_manifest_path_value)
-        if not matched_manifest_path.is_absolute():
-            matched_manifest_path = Path.cwd() / matched_manifest_path
-        matched_manifest_records = tuple(read_matched_manifest_jsonl(matched_manifest_path))
+    matched_manifest_records = _read_optional_matched_manifest(resolved_eval_config)
     matched_summary = summarize_matched_ambiguous_vs_ood(
         sample_analysis_records,
         positive_cohort=str(resolved_eval_config["positive_cohort"]),
         negative_cohort=str(resolved_eval_config["negative_cohort"]),
         primary_pair=str(resolved_eval_config["primary_pair"]),
         weighted_pair=str(resolved_eval_config["weighted_pair"]),
+        secondary_pair=str(resolved_eval_config["secondary_pair"]),
         primary_scalar=str(resolved_eval_config["primary_scalar"]),
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
