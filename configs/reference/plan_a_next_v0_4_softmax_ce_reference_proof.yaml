@@ -1,0 +1,25 @@
+reference_train:
+  reference_id: plan_a_next_v0_4_softmax_ce_reference_proof
+  model_family: softmax_ce_reference
+  score_name: softmax_entropy
+  seed: 7
+  epochs: 1
+  runtime:
+    backend: auto
+    dtype: float32
+    amp_enabled: false
+  dataloader:
+    batch_size: 256
+    shuffle: true
+    drop_last: true
+    num_workers: 0
+    pin_memory: auto
+  inference_dataloader:
+    batch_size: 256
+    num_workers: 0
+    pin_memory: auto
+  optimizer:
+    name: sgd
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0005

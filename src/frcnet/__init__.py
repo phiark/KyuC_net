@@ -14,13 +14,17 @@ from frcnet.data import (
     write_manifest_jsonl,
 )
 from frcnet.evaluation import (
+    MatchedManifestBinDiagnostic,
     MatchedBenchmarkSummary,
     MatchedManifestRecord,
     PropositionViewRecord,
+    ReferenceScoreRecord,
     SampleAnalysisRecord,
     Top1PropositionRecord,
+    build_frozen_matched_manifest,
     build_proposition_view_records,
     build_top1_proposition_records,
+    read_reference_score_records,
     read_matched_manifest,
     read_proposition_view_records,
     read_sample_analysis_records,
@@ -31,11 +35,13 @@ from frcnet.evaluation import (
     summarize_matched_ambiguous_vs_ood,
     write_matched_benchmark_summary,
     write_matched_manifest,
+    write_matched_manifest_bin_diagnostics,
     write_proposition_view_records,
+    write_reference_score_records,
     write_sample_analysis_records,
     write_top1_proposition_records,
 )
-from frcnet.models import FRCNetModel, ModelOutput
+from frcnet.models import FRCNetModel, ModelOutput, SoftmaxReferenceModel
 from frcnet.training import LossBreakdown, compute_total_loss, run_train_step
 from frcnet.utils import (
     RuntimeSpec,
@@ -54,13 +60,17 @@ __all__ = [
     "LossBreakdown",
     "ManifestBackedVisionDataset",
     "MatchedBenchmarkSummary",
+    "MatchedManifestBinDiagnostic",
     "MatchedManifestRecord",
     "ModelOutput",
     "PropositionViewRecord",
+    "ReferenceScoreRecord",
     "RuntimeSpec",
     "SampleAnalysisRecord",
     "SampleManifestRecord",
+    "SoftmaxReferenceModel",
     "Top1PropositionRecord",
+    "build_frozen_matched_manifest",
     "build_plan_a_manifest",
     "build_proposition_view_records",
     "build_top1_proposition_records",
@@ -73,6 +83,7 @@ __all__ = [
     "read_manifest_jsonl",
     "read_matched_manifest",
     "read_proposition_view_records",
+    "read_reference_score_records",
     "read_sample_analysis_records",
     "resolve_runtime",
     "resolution_weighted_content_entropy",
@@ -87,9 +98,11 @@ __all__ = [
     "write_manifest_jsonl",
     "write_matched_benchmark_summary",
     "write_matched_manifest",
+    "write_matched_manifest_bin_diagnostics",
     "write_proposition_view_records",
+    "write_reference_score_records",
     "write_sample_analysis_records",
     "write_top1_proposition_records",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

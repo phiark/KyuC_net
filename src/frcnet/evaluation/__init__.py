@@ -27,11 +27,14 @@ from frcnet.evaluation.matched_benchmark import (
     write_scalar_benchmark_summaries,
 )
 from frcnet.evaluation.matched_manifest import (
+    MatchedManifestBinDiagnostic,
     MatchedManifestRecord,
+    build_frozen_matched_manifest,
     compute_matched_manifest_hash,
     construction_config_hash,
     read_matched_manifest,
     with_manifest_hash,
+    write_matched_manifest_bin_diagnostics,
     write_matched_manifest,
 )
 from frcnet.evaluation.records import (
@@ -49,7 +52,12 @@ from frcnet.evaluation.records import (
     write_sample_analysis_records,
     write_top1_proposition_records,
 )
-from frcnet.evaluation.reference_baselines import softmax_entropy_reference_scores
+from frcnet.evaluation.reference_baselines import (
+    ReferenceScoreRecord,
+    read_reference_score_records,
+    softmax_entropy_reference_scores,
+    write_reference_score_records,
+)
 from frcnet.evaluation.state_metrics import (
     state_content_entropy,
     state_entropy,
@@ -62,8 +70,10 @@ __all__ = [
     "DEFAULT_COMPLETION_SCAN_SCALARS",
     "DEFAULT_WEIGHTED_PAIR_NAME",
     "MatchedBenchmarkSummary",
+    "MatchedManifestBinDiagnostic",
     "MatchedManifestRecord",
     "PropositionViewRecord",
+    "ReferenceScoreRecord",
     "SampleAnalysisRecord",
     "ScalarBenchmarkSummary",
     "ScalarRocCurve",
@@ -72,6 +82,7 @@ __all__ = [
     "Top1PropositionRecord",
     "binary_pignistic_beta",
     "build_scalar_roc_curve",
+    "build_frozen_matched_manifest",
     "build_proposition_view_records",
     "build_sample_analysis_records",
     "build_top1_proposition_records",
@@ -81,6 +92,7 @@ __all__ = [
     "construction_config_hash",
     "read_analysis_export_summary",
     "read_matched_manifest",
+    "read_reference_score_records",
     "read_proposition_view_records",
     "read_sample_analysis_records",
     "read_top1_proposition_records",
@@ -95,6 +107,8 @@ __all__ = [
     "with_manifest_hash",
     "write_matched_benchmark_summary",
     "write_matched_manifest",
+    "write_matched_manifest_bin_diagnostics",
+    "write_reference_score_records",
     "write_scalar_benchmark_summaries",
     "write_analysis_export_summary",
     "write_proposition_view_records",

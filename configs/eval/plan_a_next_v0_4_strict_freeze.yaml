@@ -1,0 +1,23 @@
+eval:
+  protocol_id: plan_a_next_v0_4_strict_freeze
+  positive_cohort: ambiguous_id
+  negative_cohort: ood
+  primary_pair: resolution_ratio__state_weighted_content_entropy
+  secondary_pair: resolution_ratio__state_content_entropy
+  weighted_pair: resolution_ratio__state_content_entropy
+  primary_scalar: top1_completion_beta_0_1
+  tau_scalar_name: proposition_truth_ratio
+  completion_scan_scalars:
+    - top1_completion_beta_0_1
+    - top1_completion_beta_0_25
+    - top1_completion_beta_0_5
+    - top1_completion_beta_0_75
+  matched_manifest_path: artifacts/studies/plan_a_next_v0_4_strict_freeze_local/shared/matched_manifest/frozen_matched_manifest.jsonl
+  require_matched_manifest: true
+  reference:
+    model_family: softmax_ce_reference
+    score_name: softmax_entropy
+    num_bins: 10
+  emit_proposition_diagnostics: true
+  test_size: 0.3
+  random_state: 7

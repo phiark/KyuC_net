@@ -17,6 +17,7 @@ from frcnet.evaluation.matched_benchmark import (
     summarize_scalar_benchmarks,
     write_scalar_benchmark_summaries,
 )
+from frcnet.evaluation.matched_manifest import MatchedManifestRecord
 
 COHORT_COLORS = {
     "easy_id": "#1f77b4",
@@ -194,6 +195,7 @@ def write_scalar_roc_curve(
     test_size: float,
     random_state: int,
     dpi: int = 200,
+    matched_manifest_records: list[MatchedManifestRecord] | None = None,
 ) -> Path:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -204,6 +206,7 @@ def write_scalar_roc_curve(
         scalar_name=scalar_name,
         test_size=test_size,
         random_state=random_state,
+        matched_manifest_records=matched_manifest_records,
     )
 
     plt.figure(figsize=(7, 6))
@@ -303,6 +306,7 @@ def write_completion_scan_table(
     scalar_names: tuple[str, ...],
     test_size: float,
     random_state: int,
+    matched_manifest_records: list[MatchedManifestRecord] | None = None,
 ) -> Path:
     summaries = summarize_scalar_benchmarks(
         records,
@@ -311,6 +315,7 @@ def write_completion_scan_table(
         negative_cohort=negative_cohort,
         test_size=test_size,
         random_state=random_state,
+        matched_manifest_records=matched_manifest_records,
     )
     return write_scalar_benchmark_summaries(summaries, output_path)
 
@@ -324,6 +329,7 @@ def write_proposition_diagnostic_table(
     scalar_names: tuple[str, ...],
     test_size: float,
     random_state: int,
+    matched_manifest_records: list[MatchedManifestRecord] | None = None,
 ) -> Path:
     summaries = summarize_scalar_benchmarks(
         records,
@@ -333,6 +339,7 @@ def write_proposition_diagnostic_table(
         test_size=test_size,
         random_state=random_state,
         allow_label_aware=True,
+        matched_manifest_records=matched_manifest_records,
     )
     return write_scalar_benchmark_summaries(summaries, output_path)
 

@@ -3,7 +3,7 @@
 - document_id: docs_index
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-22
+- last_updated: 2026-04-25
 - standard_alignment: iso_8601, iso_iec_ieee_15289, iso_iec_11179_inspired
 
 ## 1. 目的
@@ -33,6 +33,7 @@
 - [架构说明](architecture/architecture_description.md)
 - [方案 A 论文连接说明](architecture/plan_a_paper_linkage.md)
 - [Plan A Next v0.2 协议](architecture/plan_a_next_v0_2_protocol.md)
+- [Plan A Next v0.4 semantic repair plan](architecture/plan_a_next_v0_4_semantic_repair_plan.md)
 - [方案 A v0.3 研究协议](architecture/plan_a_v0_3_protocol.md)
 - [方案 A v0.3debug 理论对齐协议](architecture/plan_a_v0_3debug_protocol.md)
 - [方案 A v0.3debug R2 协议](architecture/plan_a_v0_3debug_r2_protocol.md)
@@ -53,6 +54,9 @@
 - [ADR-0005 v0.3debug R2 benchmark 与 geometry 修复](../records/decisions/adr_0005_v0_3debug_r2_benchmark_and_geometry_repair.md)
 - [ADR-0006 Plan A Next v0.2 data semantic baseline](../records/decisions/adr_0006_plan_a_next_v0_2_data_semantic_baseline.md)
 - [2026-04-24 Plan A Next v0.2 issue ledger](../records/reviews/2026-04-24_review_plan_a_next_v0_2_issue_ledger.md)
+- [2026-04-25 Literature and project alignment review](../records/reviews/2026-04-25_review_literature_project_alignment.md)
+- [2026-04-25 V4.0 strict freeze scope control](../records/reviews/2026-04-25_review_v0_4_strict_freeze_scope_control.md)
+- [2026-04-25 V4.0 strict freeze local proof](../records/reviews/2026-04-25_review_v0_4_strict_freeze_local_proof.md)
 
 ### 3.6 Templates
 

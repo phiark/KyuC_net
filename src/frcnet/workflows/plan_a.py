@@ -218,6 +218,7 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
             "negative_cohort": "ood",
             "primary_pair": "resolution_ratio__state_content_entropy",
             "weighted_pair": "resolution_ratio__state_weighted_content_entropy",
+            "secondary_pair": "resolution_ratio__state_weighted_content_entropy",
             "primary_scalar": "top1_completion_beta_0_1",
             "tau_scalar_name": "proposition_truth_ratio",
             "completion_scan_scalars": (
@@ -228,6 +229,7 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
             ),
             "emit_proposition_diagnostics": True,
             "matched_manifest_path": "",
+            "require_matched_manifest": False,
             "test_size": 0.3,
             "random_state": 7,
         }
@@ -249,11 +251,18 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
         "weighted_pair": str(
             eval_config.get("weighted_pair", "resolution_ratio__state_weighted_content_entropy")
         ),
+        "secondary_pair": str(
+            eval_config.get(
+                "secondary_pair",
+                eval_config.get("weighted_pair", "resolution_ratio__state_weighted_content_entropy"),
+            )
+        ),
         "primary_scalar": str(eval_config.get("primary_scalar", "top1_completion_beta_0_1")),
         "tau_scalar_name": str(eval_config.get("tau_scalar_name", "proposition_truth_ratio")),
         "completion_scan_scalars": tuple(str(value) for value in completion_scan_scalars),
         "emit_proposition_diagnostics": bool(eval_config.get("emit_proposition_diagnostics", True)),
         "matched_manifest_path": str(eval_config.get("matched_manifest_path", "")),
+        "require_matched_manifest": bool(eval_config.get("require_matched_manifest", False)),
         "test_size": float(eval_config.get("test_size", 0.3)),
         "random_state": int(eval_config.get("random_state", 7)),
     }
@@ -262,9 +271,13 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
 def _read_optional_matched_manifest(resolved_eval_config: Mapping[str, Any]):
     manifest_path = str(resolved_eval_config.get("matched_manifest_path", ""))
     if not manifest_path:
+        if bool(resolved_eval_config.get("require_matched_manifest", False)):
+            raise ValueError("matched_manifest_path is required when require_matched_manifest=true.")
         return None
     path = Path(manifest_path)
     if not path.exists():
+        if bool(resolved_eval_config.get("require_matched_manifest", False)):
+            raise FileNotFoundError(f"matched_manifest_path does not exist: {path}")
         return None
     return read_matched_manifest(path)
 
@@ -809,7 +822,7 @@ def _evaluate_validation_epoch(
         positive_cohort=str(resolved_eval_config["positive_cohort"]),
         negative_cohort=str(resolved_eval_config["negative_cohort"]),
         primary_pair=str(resolved_eval_config["primary_pair"]),
-        weighted_pair=str(resolved_eval_config["weighted_pair"]),
+        weighted_pair=str(resolved_eval_config["secondary_pair"]),
         primary_scalar=str(resolved_eval_config["primary_scalar"]),
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
@@ -1920,17 +1933,18 @@ def generate_plan_a_artifact_bundle(
         sample_analysis_records,
         output_root / analysis_config.get("cohort_summary_table_name", "cohort_summary_table.csv"),
     )
+    matched_manifest_records = _read_optional_matched_manifest(resolved_eval_config)
     matched_summary = summarize_matched_ambiguous_vs_ood(
         sample_analysis_records,
         positive_cohort=str(resolved_eval_config["positive_cohort"]),
         negative_cohort=str(resolved_eval_config["negative_cohort"]),
         primary_pair=str(resolved_eval_config["primary_pair"]),
-        weighted_pair=str(resolved_eval_config["weighted_pair"]),
+        weighted_pair=str(resolved_eval_config["secondary_pair"]),
         primary_scalar=str(resolved_eval_config["primary_scalar"]),
         completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
         random_state=int(resolved_eval_config["random_state"]),
-        matched_manifest_records=_read_optional_matched_manifest(resolved_eval_config),
+        matched_manifest_records=matched_manifest_records,
     )
     matched_path = write_matched_benchmark_summary(
         matched_summary,
@@ -1944,6 +1958,7 @@ def generate_plan_a_artifact_bundle(
         scalar_names=tuple(resolved_eval_config["completion_scan_scalars"]),
         test_size=float(resolved_eval_config["test_size"]),
         random_state=int(resolved_eval_config["random_state"]),
+        matched_manifest_records=matched_manifest_records,
     )
     proposition_diagnostic_table_path: Path | None = None
     proposition_tau_roc_curve_path: Path | None = None
@@ -1956,6 +1971,7 @@ def generate_plan_a_artifact_bundle(
             scalar_names=tuple(analysis_config.get("proposition_diagnostic_scalars", ())),
             test_size=float(resolved_eval_config["test_size"]),
             random_state=int(resolved_eval_config["random_state"]),
+            matched_manifest_records=matched_manifest_records,
         )
         proposition_tau_roc_curve_path = write_scalar_roc_curve(
             sample_analysis_records,
@@ -1963,6 +1979,7 @@ def generate_plan_a_artifact_bundle(
             positive_cohort=str(resolved_eval_config["positive_cohort"]),
             negative_cohort=str(resolved_eval_config["negative_cohort"]),
             scalar_name=str(resolved_eval_config["tau_scalar_name"]),
+            matched_manifest_records=matched_manifest_records,
             test_size=float(resolved_eval_config["test_size"]),
             random_state=int(resolved_eval_config["random_state"]),
             dpi=figure_dpi,

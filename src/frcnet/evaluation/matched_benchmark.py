@@ -140,10 +140,16 @@ class MatchedBenchmarkSummary:
     pair_name: str = "resolution_ratio__state_content_entropy"
     weighted_pair_name: str = DEFAULT_WEIGHTED_PAIR_NAME
     scalar_name: str = "top1_completion_beta_0_1"
+    secondary_pair_name: str = ""
+    secondary_pair_auroc: float | None = None
     completion_scan_scalar_names: tuple[str, ...] = DEFAULT_COMPLETION_SCAN_SCALARS
     completion_scan_aurocs: tuple[float, ...] = ()
 
     def to_csv_row(self) -> dict[str, str | int | float]:
+        secondary_pair_name = self.secondary_pair_name or self.weighted_pair_name
+        secondary_pair_auroc = (
+            self.weighted_pair_auroc if self.secondary_pair_auroc is None else self.secondary_pair_auroc
+        )
         return {
             "model_family": self.model_family,
             "protocol_id": self.protocol_id,
@@ -158,6 +164,8 @@ class MatchedBenchmarkSummary:
             "test_size": self.test_size,
             "random_state": self.random_state,
             "pair_auroc": self.pair_auroc,
+            "secondary_pair_name": secondary_pair_name,
+            "secondary_pair_auroc": secondary_pair_auroc,
             "weighted_pair_name": self.weighted_pair_name,
             "weighted_pair_auroc": self.weighted_pair_auroc,
             "scalar_auroc": self.scalar_auroc,
@@ -302,18 +310,29 @@ def build_scalar_roc_curve(
     test_size: float = 0.3,
     random_state: int = 7,
     allow_label_aware: bool = True,
+    matched_manifest_records: Sequence[MatchedManifestRecord] | None = None,
 ) -> ScalarRocCurve:
-    ordered_records, labels, test_index = _prepare_matched_records(
-        sample_analysis_records,
-        positive_cohort=positive_cohort,
-        negative_cohort=negative_cohort,
-        test_size=test_size,
-        random_state=random_state,
-    )
+    if matched_manifest_records is None:
+        ordered_records, labels, test_index = _prepare_matched_records(
+            sample_analysis_records,
+            positive_cohort=positive_cohort,
+            negative_cohort=negative_cohort,
+            test_size=test_size,
+            random_state=random_state,
+        )
+    else:
+        ordered_records, labels, test_index = _prepare_frozen_matched_records(
+            sample_analysis_records,
+            matched_manifest_records=matched_manifest_records,
+            positive_cohort=positive_cohort,
+            negative_cohort=negative_cohort,
+            test_size=test_size,
+            random_state=random_state,
+        )
     scalar_features = _build_scalar_features(ordered_records, scalar_name, allow_label_aware=allow_label_aware)
     false_positive_rate, true_positive_rate, _ = roc_curve(labels[test_index], scalar_features[test_index])
     auroc = float(roc_auc_score(labels[test_index], scalar_features[test_index]))
-    matched_count = labels.shape[0] // 2
+    matched_count = int(min(labels.sum(), labels.shape[0] - labels.sum()))
     return ScalarRocCurve(
         scalar_name=scalar_name,
         positive_cohort=positive_cohort,
@@ -327,24 +346,19 @@ def build_scalar_roc_curve(
     )
 
 
-def summarize_scalar_benchmarks(
-    sample_analysis_records: list[SampleAnalysisRecord],
+def _summarize_scalar_benchmarks_from_prepared(
+    ordered_records: list[SampleAnalysisRecord],
+    labels: np.ndarray,
+    test_index: np.ndarray,
     *,
     scalar_names: Sequence[str],
-    positive_cohort: str = "ambiguous_id",
-    negative_cohort: str = "ood",
-    test_size: float = 0.3,
-    random_state: int = 7,
-    allow_label_aware: bool = False,
+    positive_cohort: str,
+    negative_cohort: str,
+    test_size: float,
+    random_state: int,
+    allow_label_aware: bool,
 ) -> list[ScalarBenchmarkSummary]:
-    ordered_records, labels, test_index = _prepare_matched_records(
-        sample_analysis_records,
-        positive_cohort=positive_cohort,
-        negative_cohort=negative_cohort,
-        test_size=test_size,
-        random_state=random_state,
-    )
-    matched_count = labels.shape[0] // 2
+    matched_count = int(min(labels.sum(), labels.shape[0] - labels.sum()))
     unique_scalar_names: list[str] = []
     for scalar_name in scalar_names:
         if scalar_name not in unique_scalar_names:
@@ -378,6 +392,47 @@ def summarize_scalar_benchmarks(
     return summaries
 
 
+def summarize_scalar_benchmarks(
+    sample_analysis_records: list[SampleAnalysisRecord],
+    *,
+    scalar_names: Sequence[str],
+    positive_cohort: str = "ambiguous_id",
+    negative_cohort: str = "ood",
+    test_size: float = 0.3,
+    random_state: int = 7,
+    allow_label_aware: bool = False,
+    matched_manifest_records: Sequence[MatchedManifestRecord] | None = None,
+) -> list[ScalarBenchmarkSummary]:
+    if matched_manifest_records is None:
+        ordered_records, labels, test_index = _prepare_matched_records(
+            sample_analysis_records,
+            positive_cohort=positive_cohort,
+            negative_cohort=negative_cohort,
+            test_size=test_size,
+            random_state=random_state,
+        )
+    else:
+        ordered_records, labels, test_index = _prepare_frozen_matched_records(
+            sample_analysis_records,
+            matched_manifest_records=matched_manifest_records,
+            positive_cohort=positive_cohort,
+            negative_cohort=negative_cohort,
+            test_size=test_size,
+            random_state=random_state,
+        )
+    return _summarize_scalar_benchmarks_from_prepared(
+        ordered_records,
+        labels,
+        test_index,
+        scalar_names=scalar_names,
+        positive_cohort=positive_cohort,
+        negative_cohort=negative_cohort,
+        test_size=test_size,
+        random_state=random_state,
+        allow_label_aware=allow_label_aware,
+    )
+
+
 def summarize_matched_ambiguous_vs_ood(
     sample_analysis_records: list[SampleAnalysisRecord],
     positive_cohort: str = "ambiguous_id",
@@ -407,18 +462,21 @@ def summarize_matched_ambiguous_vs_ood(
             test_size=test_size,
             random_state=random_state,
         )
-    matched_count = labels.shape[0] // 2
+    matched_count = int(min(labels.sum(), labels.shape[0] - labels.sum()))
 
     pair_features = _build_pair_features(ordered_records, primary_pair)
     weighted_pair_features = _build_pair_features(ordered_records, weighted_pair)
     scalar_features = _build_scalar_features(ordered_records, primary_scalar)
-    completion_scan_summaries = summarize_scalar_benchmarks(
+    completion_scan_summaries = _summarize_scalar_benchmarks_from_prepared(
         ordered_records,
+        labels,
+        test_index,
         scalar_names=completion_scan_scalars,
         positive_cohort=positive_cohort,
         negative_cohort=negative_cohort,
         test_size=test_size,
         random_state=random_state,
+        allow_label_aware=False,
     )
 
     train_index = np.setdiff1d(np.arange(labels.shape[0]), test_index, assume_unique=True)
@@ -462,6 +520,8 @@ def summarize_matched_ambiguous_vs_ood(
         pair_name=primary_pair,
         weighted_pair_name=weighted_pair,
         scalar_name=primary_scalar,
+        secondary_pair_name=weighted_pair,
+        secondary_pair_auroc=weighted_pair_auroc,
         completion_scan_scalar_names=tuple(summary.scalar_name for summary in completion_scan_summaries),
         completion_scan_aurocs=tuple(summary.auroc for summary in completion_scan_summaries),
     )
