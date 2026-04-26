@@ -19,6 +19,8 @@ class BatchInput:
     cohort_name: list[str]
     source_dataset_name: list[str]
     source_class_label: list[int | None] | None = None
+    source_domain_name: list[str] | None = None
+    source_domain_label: list[int | None] | None = None
     source_dataset_split: list[str] | None = None
     source_role: list[str] | None = None
     source_partition_name: list[str] | None = None
@@ -56,6 +58,8 @@ def validate_batch_input(batch_input: BatchInput, num_classes: int | None = None
     if batch_input.source_class_label is not None and len(batch_input.source_class_label) != batch_size:
         raise ValueError("source_class_label must contain one entry per batch item when provided.")
     for optional_field_name, optional_field_value in (
+        ("source_domain_name", batch_input.source_domain_name),
+        ("source_domain_label", batch_input.source_domain_label),
         ("source_dataset_split", batch_input.source_dataset_split),
         ("source_role", batch_input.source_role),
         ("source_partition_name", batch_input.source_partition_name),

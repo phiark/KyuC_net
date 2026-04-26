@@ -24,6 +24,12 @@ class SampleManifestRecord:
     source_dataset_split: str = ""
     source_role: str = ""
     source_partition_name: str = ""
+    source_domain_name: str = ""
+    source_domain_label: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.source_domain_name:
+            self.source_domain_name = self.source_dataset_name
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -32,6 +38,8 @@ class SampleManifestRecord:
             "split_name": self.split_name,
             "cohort_name": self.cohort_name,
             "source_dataset_name": self.source_dataset_name,
+            "source_domain_name": self.source_domain_name,
+            "source_domain_label": self.source_domain_label,
             "source_dataset_split": self.source_dataset_split,
             "source_role": self.source_role,
             "source_partition_name": self.source_partition_name,
@@ -66,6 +74,12 @@ class SampleManifestRecord:
             source_dataset_split=str(payload.get("source_dataset_split", payload.get("source_split", ""))),
             source_role=str(payload.get("source_role", "")),
             source_partition_name=str(payload.get("source_partition_name", "")),
+            source_domain_name=str(payload.get("source_domain_name", payload["source_dataset_name"])),
+            source_domain_label=(
+                None
+                if payload.get("source_domain_label") in {None, ""}
+                else int(payload["source_domain_label"])
+            ),
         )
 
 

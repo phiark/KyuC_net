@@ -18,6 +18,7 @@ from frcnet.data.plan_a import (
     summarize_manifest,
     write_manifest_summary,
 )
+from frcnet.data.sampling import SourceBalancedBatchSampler
 
 __all__ = [
     "ALLOWED_COHORT_NAMES",
@@ -25,6 +26,7 @@ __all__ = [
     "CIFAR10_CLASS_NAMES",
     "ManifestBackedVisionDataset",
     "SampleManifestRecord",
+    "SourceBalancedBatchSampler",
     "build_plan_a_manifest",
     "collate_manifest_samples",
     "load_plan_a_source_datasets",

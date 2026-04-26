@@ -39,6 +39,8 @@
 - `VER-CON-007`: proposition record contract 保证规范 `tau` 已切换到 `proposition_truth_ratio`
 - `VER-CON-008`: v0.2 primary scalar whitelist 不包含 label-aware proposition fields
 - `VER-CON-009`: frozen matched manifest hash 对同配置稳定, 对 reference score 改动敏感
+- `VER-CON-010`: V0.6 manifest roundtrip 保留 `source_domain_name` 与 `source_domain_label`
+- `VER-CON-011`: V0.6 CIFAR-100 不得进入 train 或 validation manifest
 
 ### 2.3 Integration Verification
 
@@ -64,6 +66,8 @@
 - `VER-INT-018`: formal matched benchmark 可使用 frozen matched manifest, 不依赖临时数量截断
 - `VER-INT-019`: manifest overlap audit 使用 `(source_dataset_name, source_dataset_split, source_sample_index)` 验证 validation/final 零交叉
 - `VER-INT-020`: V0.5 final report 为 seen SVHN OOD、unseen CIFAR-100 OOD 和 all OOD 分别生成 frozen matched benchmark
+- `VER-INT-021`: V0.6 source-balanced sampler 在 batch 内平衡 OOD/unknown source
+- `VER-INT-022`: V0.6 aggregate 输出 source slice metrics、worst-source AUROC、seen-unseen gap 和 pair-scalar delta
 
 ### 2.4 Scientific Validation
 
@@ -75,6 +79,7 @@
 - `VER-SCI-004`: easy ID accuracy 不出现不可接受退化
 - `VER-SCI-005`: v0.2 final test 达到 release gate 或明确标记 partial/negative evidence
 - `VER-SCI-006`: v0.5 final test 的 unseen OOD 结论仅来自 CIFAR-100 final-only slice
+- `VER-SCI-007`: v0.6 final test 以 CIFAR-100 LOSO、worst-source AUROC 与 seen-unseen gap 判断修复等级
 
 ## 3. 需求到验证映射
 
@@ -106,8 +111,12 @@
 | `REQ-FN-036` | `VER-UNIT-006`, `VER-CON-008` |
 | `REQ-FN-037` | `VER-CON-009`, `VER-INT-018` |
 | `REQ-FN-038` | `VER-CON-008`, `VER-INT-016` |
+| `REQ-FN-043` | `VER-CON-011`, `VER-INT-021` |
+| `REQ-FN-044` | `VER-INT-021` |
+| `REQ-FN-045` | `VER-INT-022` |
 | `REQ-SCI-001` | `VER-SCI-001` |
 | `REQ-SCI-002` | `VER-SCI-002` |
+| `REQ-SCI-009` | `VER-SCI-007` |
 | `REQ-SCI-003` | `VER-SCI-004` |
 | `REQ-SCI-004` | `VER-INT-009` |
 | `REQ-SCI-005` | `VER-CON-007`, `VER-SCI-003` |

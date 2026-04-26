@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import hashlib
 import json
 import random
+import tarfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+import urllib.request
 import warnings
 
 import numpy as np
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
 from torchvision import datasets
@@ -16,6 +20,9 @@ from torchvision.transforms import functional as tvf
 
 from frcnet.data.contracts import BatchInput
 from frcnet.data.manifest import SampleManifestRecord
+
+LSUN_RESIZE_URL = "https://www.dropbox.com/s/raw/moqh2wh8696c3yl/LSUN_resize.tar.gz"
+LSUN_RESIZE_MD5 = "278b7b31c8cb7e804a1465a8ce03a2dc"
 
 CIFAR10_CLASS_NAMES: tuple[str, ...] = (
     "airplane",
@@ -45,6 +52,8 @@ class ManifestSample:
     source_sample_indices: tuple[int, ...]
     augmentation_recipe: str
     source_class_label: int | None
+    source_domain_name: str
+    source_domain_label: int | None
     candidate_class_mask: torch.Tensor | None
 
 
@@ -53,6 +62,10 @@ def _extract_labels(dataset: object) -> list[int]:
         return [int(label) for label in getattr(dataset, "targets")]
     if hasattr(dataset, "labels"):
         return [int(label) for label in getattr(dataset, "labels")]
+    if hasattr(dataset, "_labels"):
+        return [int(label) for label in getattr(dataset, "_labels")]
+    if hasattr(dataset, "samples"):
+        return [int(sample[1]) for sample in getattr(dataset, "samples")]
     raise ValueError("Dataset must expose either `targets` or `labels`.")
 
 
@@ -80,28 +93,171 @@ def _load_cifar100_dataset(dataset_config: Mapping[str, Any]) -> object:
     )
 
 
+class SyntheticNoiseDataset(Dataset[tuple[torch.Tensor, int]]):
+    def __init__(
+        self,
+        *,
+        length: int,
+        seed: int,
+        mean: float = 0.5,
+        std: float = 0.25,
+        image_size: int = 32,
+        label: int = -1,
+    ) -> None:
+        if length < 0:
+            raise ValueError("SyntheticNoiseDataset.length must be non-negative.")
+        self.length = int(length)
+        self.seed = int(seed)
+        self.mean = float(mean)
+        self.std = float(std)
+        self.image_size = int(image_size)
+        self.targets = [int(label)] * self.length
+
+    def __len__(self) -> int:
+        return self.length
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
+        if index < 0 or index >= self.length:
+            raise IndexError(index)
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + int(index))
+        image = torch.randn((3, self.image_size, self.image_size), generator=generator)
+        return torch.clamp((image * self.std) + self.mean, 0.0, 1.0), self.targets[index]
+
+
+class FlatImageFolderDataset(Dataset[tuple[Image.Image, int]]):
+    SUPPORTED_SUFFIXES = frozenset({".bmp", ".jpeg", ".jpg", ".png", ".webp"})
+
+    def __init__(self, root: str | Path, *, label: int = -1) -> None:
+        self.root = Path(root)
+        if not self.root.exists():
+            raise FileNotFoundError(f"Image source root does not exist: {self.root}")
+        self.files = tuple(
+            sorted(
+                path
+                for path in self.root.rglob("*")
+                if path.is_file() and path.suffix.lower() in self.SUPPORTED_SUFFIXES
+            )
+        )
+        if not self.files:
+            raise ValueError(f"Image source root contains no supported images: {self.root}")
+        self.targets = [int(label)] * len(self.files)
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+    def __getitem__(self, index: int) -> tuple[Image.Image, int]:
+        image = Image.open(self.files[index]).convert("RGB")
+        return image, self.targets[index]
+
+
+def _resolve_image_source_root(dataset_config: Mapping[str, Any]) -> Path:
+    root = Path(str(dataset_config["root"]))
+    split_name = str(dataset_config.get("split", ""))
+    if split_name:
+        split_root = root / split_name
+        if split_root.exists():
+            return split_root
+    return root
+
+
+def _load_dtd_dataset(dataset_config: Mapping[str, Any]) -> object:
+    return datasets.DTD(
+        root=str(dataset_config["root"]),
+        split=str(dataset_config.get("split", "train")),
+        download=bool(dataset_config.get("download", False)),
+    )
+
+
+def _load_flat_image_dataset(dataset_config: Mapping[str, Any]) -> FlatImageFolderDataset:
+    if bool(dataset_config.get("download", False)):
+        raise ValueError("Directory-backed OOD image sources do not support download=true.")
+    return FlatImageFolderDataset(
+        _resolve_image_source_root(dataset_config),
+        label=int(dataset_config.get("label", -1)),
+    )
+
+
+def _md5_digest(path: Path) -> str:
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download_file(url: str, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    urllib.request.urlretrieve(url, output_path)
+
+
+def _extract_tarball(input_path: Path, output_root: Path) -> None:
+    with tarfile.open(input_path, "r:gz") as archive:
+        archive.extractall(output_root)
+
+
+def _load_lsun_resize_dataset(dataset_config: Mapping[str, Any]) -> FlatImageFolderDataset:
+    root = Path(str(dataset_config["root"]))
+    if bool(dataset_config.get("download", False)):
+        archive_path = root / "LSUN_resize.tar.gz"
+        if not archive_path.exists():
+            _download_file(str(dataset_config.get("url", LSUN_RESIZE_URL)), archive_path)
+        expected_md5 = str(dataset_config.get("md5", LSUN_RESIZE_MD5))
+        if expected_md5 and _md5_digest(archive_path) != expected_md5:
+            raise ValueError(f"LSUN_resize archive md5 mismatch: {archive_path}")
+        if not any(path.is_file() and path.suffix.lower() in FlatImageFolderDataset.SUPPORTED_SUFFIXES for path in root.rglob("*")):
+            _extract_tarball(archive_path, root)
+    return FlatImageFolderDataset(
+        _resolve_image_source_root(dataset_config),
+        label=int(dataset_config.get("label", -1)),
+    )
+
+
+def _load_gaussian_noise_dataset(dataset_config: Mapping[str, Any]) -> SyntheticNoiseDataset:
+    return SyntheticNoiseDataset(
+        length=int(dataset_config.get("length", dataset_config.get("count", 10000))),
+        seed=int(dataset_config.get("seed", 7)),
+        mean=float(dataset_config.get("mean", 0.5)),
+        std=float(dataset_config.get("std", 0.25)),
+        image_size=int(dataset_config.get("image_size", 32)),
+        label=int(dataset_config.get("label", -1)),
+    )
+
+
 def _dataset_split_name(dataset_name: str, dataset_config: Mapping[str, Any]) -> str:
     if dataset_name in {"cifar10", "cifar100"}:
         return "train" if bool(dataset_config.get("train", False)) else "test"
     if dataset_name == "svhn":
         return str(dataset_config.get("split", "test"))
+    if dataset_name in {"dtd", "lsun_resize", "tiny_imagenet", "imagenet_resize", "gaussian_noise"}:
+        return str(dataset_config.get("split", "all"))
     return str(dataset_config.get("split", ""))
 
 
 def load_plan_a_source_datasets(protocol_config: Mapping[str, Any]) -> dict[str, object]:
     datasets_config = protocol_config["datasets"]
-    cifar_config = datasets_config["cifar10"]
-    svhn_config = datasets_config["svhn"]
-    loaded_datasets: dict[str, object] = {
-        "cifar10": _load_cifar10_dataset(cifar_config),
-        "svhn": datasets.SVHN(
-            root=svhn_config["root"],
-            split=svhn_config.get("split", "test"),
-            download=bool(svhn_config.get("download", False)),
-        ),
-    }
-    if "cifar100" in datasets_config:
-        loaded_datasets["cifar100"] = _load_cifar100_dataset(datasets_config["cifar100"])
+    loaded_datasets: dict[str, object] = {}
+    for dataset_name, dataset_config in datasets_config.items():
+        if dataset_name == "cifar10":
+            loaded_datasets[dataset_name] = _load_cifar10_dataset(dataset_config)
+        elif dataset_name == "svhn":
+            loaded_datasets[dataset_name] = datasets.SVHN(
+                root=dataset_config["root"],
+                split=dataset_config.get("split", "test"),
+                download=bool(dataset_config.get("download", False)),
+            )
+        elif dataset_name == "cifar100":
+            loaded_datasets[dataset_name] = _load_cifar100_dataset(dataset_config)
+        elif dataset_name == "dtd":
+            loaded_datasets[dataset_name] = _load_dtd_dataset(dataset_config)
+        elif dataset_name == "lsun_resize":
+            loaded_datasets[dataset_name] = _load_lsun_resize_dataset(dataset_config)
+        elif dataset_name in {"tiny_imagenet", "imagenet_resize"}:
+            loaded_datasets[dataset_name] = _load_flat_image_dataset(dataset_config)
+        elif dataset_name == "gaussian_noise":
+            loaded_datasets[dataset_name] = _load_gaussian_noise_dataset(dataset_config)
+        else:
+            raise ValueError(f"Unsupported Plan A source dataset: {dataset_name}")
     return loaded_datasets
 
 
@@ -128,6 +284,32 @@ def _source_partition_name(protocol_config: Mapping[str, Any], dataset_name: str
 def _source_role(protocol_config: Mapping[str, Any], dataset_name: str, default_role: str) -> str:
     source_roles = protocol_config.get("source_roles", {})
     return str(source_roles.get(dataset_name, default_role))
+
+
+def _source_domain_payload(protocol_config: Mapping[str, Any], dataset_name: str) -> Mapping[str, Any] | int | str | None:
+    source_domains = protocol_config.get("source_domains", {})
+    if not isinstance(source_domains, Mapping):
+        return None
+    return source_domains.get(dataset_name)
+
+
+def _source_domain_name(protocol_config: Mapping[str, Any], dataset_name: str) -> str:
+    payload = _source_domain_payload(protocol_config, dataset_name)
+    if isinstance(payload, Mapping):
+        return str(payload.get("name", dataset_name))
+    return dataset_name
+
+
+def _source_domain_label(protocol_config: Mapping[str, Any], dataset_name: str) -> int | None:
+    payload = _source_domain_payload(protocol_config, dataset_name)
+    if payload is None:
+        return None
+    if isinstance(payload, Mapping):
+        label = payload.get("label")
+        return None if label in {None, ""} else int(label)
+    if isinstance(payload, str) and not payload.strip():
+        return None
+    return int(payload)
 
 
 def _partition_global_indices(indices: Iterable[int], partition_config: Mapping[str, Any]) -> list[int]:
@@ -238,11 +420,8 @@ def build_plan_a_manifest(
     rng = random.Random(seed)
 
     cifar_labels = _extract_labels(source_datasets["cifar10"])
-    svhn_labels = _extract_labels(source_datasets["svhn"])
     cifar_split = _dataset_split_name("cifar10", _dataset_config(protocol_config, "cifar10"))
-    svhn_split = _dataset_split_name("svhn", _dataset_config(protocol_config, "svhn"))
     cifar_partition_name = _source_partition_name(protocol_config, "cifar10")
-    svhn_partition_name = _source_partition_name(protocol_config, "svhn")
 
     cifar_indices = _partition_class_indices(
         _labels_to_class_index(cifar_labels),
@@ -250,11 +429,23 @@ def build_plan_a_manifest(
     )
     for label_indices in cifar_indices.values():
         rng.shuffle(label_indices)
-    svhn_indices = _partition_global_indices(
-        range(len(svhn_labels)),
-        _source_partition_config(protocol_config, "svhn"),
-    )
-    rng.shuffle(svhn_indices)
+    dataset_index_pools: dict[str, list[int]] = {}
+    dataset_labels: dict[str, list[int]] = {}
+    dataset_splits: dict[str, str] = {}
+    dataset_partitions: dict[str, str] = {}
+    for dataset_name, dataset in source_datasets.items():
+        if dataset_name == "cifar10":
+            continue
+        labels = _extract_labels(dataset)
+        indices = _partition_global_indices(
+            range(len(labels)),
+            _source_partition_config(protocol_config, dataset_name),
+        )
+        rng.shuffle(indices)
+        dataset_index_pools[dataset_name] = indices
+        dataset_labels[dataset_name] = labels
+        dataset_splits[dataset_name] = _dataset_split_name(dataset_name, _dataset_config(protocol_config, dataset_name))
+        dataset_partitions[dataset_name] = _source_partition_name(protocol_config, dataset_name)
 
     manifest_records: list[SampleManifestRecord] = []
     analysis_config = protocol_config["analysis"]
@@ -284,6 +475,8 @@ def build_plan_a_manifest(
                     source_dataset_split=cifar_split,
                     source_role=_source_role(protocol_config, "cifar10", "in_domain"),
                     source_partition_name=cifar_partition_name,
+                    source_domain_name=_source_domain_name(protocol_config, "cifar10"),
+                    source_domain_label=_source_domain_label(protocol_config, "cifar10"),
                 )
             )
 
@@ -306,6 +499,8 @@ def build_plan_a_manifest(
                     source_dataset_split=cifar_split,
                     source_role=_source_role(protocol_config, "cifar10", "in_domain"),
                     source_partition_name=cifar_partition_name,
+                    source_domain_name=_source_domain_name(protocol_config, "cifar10"),
+                    source_domain_label=_source_domain_label(protocol_config, "cifar10"),
                 )
             )
 
@@ -349,40 +544,31 @@ def build_plan_a_manifest(
                         source_dataset_split=cifar_split,
                         source_role=_source_role(protocol_config, "cifar10", "in_domain"),
                         source_partition_name=cifar_partition_name,
+                        source_domain_name=_source_domain_name(protocol_config, "cifar10"),
+                        source_domain_label=_source_domain_label(protocol_config, "cifar10"),
                     )
                 )
                 ambiguous_cursor += 1
 
     ood_sources = protocol_config.get("ood_sources")
     if ood_sources is None:
-        ood_sources = [
-            {
-                "dataset_name": "svhn",
-                "count": ood_count,
-                "source_role": _source_role(protocol_config, "svhn", "seen_source_ood"),
-            }
-        ]
-    dataset_index_pools: dict[str, list[int]] = {"svhn": svhn_indices}
-    dataset_labels: dict[str, list[int]] = {"svhn": svhn_labels}
-    dataset_splits: dict[str, str] = {"svhn": svhn_split}
-    dataset_partitions: dict[str, str] = {"svhn": svhn_partition_name}
-    if "cifar100" in source_datasets:
-        cifar100_labels = _extract_labels(source_datasets["cifar100"])
-        cifar100_indices = _partition_global_indices(
-            range(len(cifar100_labels)),
-            _source_partition_config(protocol_config, "cifar100"),
-        )
-        rng.shuffle(cifar100_indices)
-        dataset_index_pools["cifar100"] = cifar100_indices
-        dataset_labels["cifar100"] = cifar100_labels
-        dataset_splits["cifar100"] = _dataset_split_name("cifar100", _dataset_config(protocol_config, "cifar100"))
-        dataset_partitions["cifar100"] = _source_partition_name(protocol_config, "cifar100")
+        ood_sources = []
+        if "svhn" in dataset_index_pools and ood_count > 0:
+            ood_sources = [
+                {
+                    "dataset_name": "svhn",
+                    "count": ood_count,
+                    "source_role": _source_role(protocol_config, "svhn", "seen_source_ood"),
+                }
+            ]
 
     for ood_source in ood_sources:
         dataset_name = str(ood_source.get("dataset_name", ood_source.get("name", "svhn")))
         if dataset_name not in dataset_index_pools:
             raise ValueError(f"Configured OOD source `{dataset_name}` is not loaded in source_datasets.")
         source_count = int(ood_source.get("count", ood_count))
+        if source_count <= 0:
+            continue
         source_role = str(ood_source.get("source_role", _source_role(protocol_config, dataset_name, "ood_source")))
         source_indices = _pop_indices(dataset_index_pools[dataset_name], source_count)
         labels = dataset_labels[dataset_name]
@@ -403,42 +589,83 @@ def build_plan_a_manifest(
                     source_dataset_split=dataset_splits[dataset_name],
                     source_role=source_role,
                     source_partition_name=str(ood_source.get("source_partition_name", dataset_partitions[dataset_name])),
+                    source_domain_name=_source_domain_name(protocol_config, dataset_name),
+                    source_domain_label=_source_domain_label(protocol_config, dataset_name),
                 )
             )
 
-    unknown_indices = _pop_indices(dataset_index_pools["svhn"], unknown_count)
-    for index in unknown_indices:
-        manifest_records.append(
-            SampleManifestRecord(
-                protocol_id=protocol_id,
-                sample_id=f"{split_name}_unknown_svhn_{index:05d}",
-                split_name=split_name,
-                cohort_name="unknown_supervision",
-                source_dataset_name="svhn",
-                source_sample_indices=(index,),
-                source_class_label=int(svhn_labels[index]),
-                class_label=-1,
-                augmentation_recipe="identity",
-                augmentation_parameters={},
-                source_class_labels=(int(svhn_labels[index]),),
-                source_dataset_split=svhn_split,
-                source_role=_source_role(protocol_config, "svhn", "seen_unknown_source"),
-                source_partition_name=svhn_partition_name,
-            )
+    unknown_sources = protocol_config.get("unknown_sources")
+    if unknown_sources is None:
+        unknown_sources = []
+        if "svhn" in dataset_index_pools and unknown_count > 0:
+            unknown_sources = [
+                {
+                    "dataset_name": "svhn",
+                    "count": unknown_count,
+                    "source_role": _source_role(protocol_config, "svhn", "seen_unknown_source"),
+                }
+            ]
+
+    for unknown_source in unknown_sources:
+        dataset_name = str(unknown_source.get("dataset_name", unknown_source.get("name", "svhn")))
+        if dataset_name not in dataset_index_pools:
+            raise ValueError(f"Configured unknown source `{dataset_name}` is not loaded in source_datasets.")
+        source_count = int(unknown_source.get("count", unknown_count))
+        if source_count <= 0:
+            continue
+        source_role = str(
+            unknown_source.get("source_role", _source_role(protocol_config, dataset_name, "seen_unknown_source"))
         )
+        source_indices = _pop_indices(dataset_index_pools[dataset_name], source_count)
+        labels = dataset_labels[dataset_name]
+        for index in source_indices:
+            manifest_records.append(
+                SampleManifestRecord(
+                    protocol_id=protocol_id,
+                    sample_id=f"{split_name}_unknown_{dataset_name}_{index:05d}",
+                    split_name=split_name,
+                    cohort_name="unknown_supervision",
+                    source_dataset_name=dataset_name,
+                    source_sample_indices=(index,),
+                    source_class_label=int(labels[index]),
+                    class_label=-1,
+                    augmentation_recipe="identity",
+                    augmentation_parameters={},
+                    source_class_labels=(int(labels[index]),),
+                    source_dataset_split=dataset_splits[dataset_name],
+                    source_role=source_role,
+                    source_partition_name=str(
+                        unknown_source.get("source_partition_name", dataset_partitions[dataset_name])
+                    ),
+                    source_domain_name=_source_domain_name(protocol_config, dataset_name),
+                    source_domain_label=_source_domain_label(protocol_config, dataset_name),
+                )
+            )
 
     return manifest_records
+
+
+def _normalize_image_tensor(tensor: torch.Tensor, *, image_size: int = 32) -> torch.Tensor:
+    if tensor.ndim != 3:
+        raise ValueError("Expected image tensors to use CHW layout.")
+    if tensor.shape[0] == 1:
+        tensor = tensor.repeat(3, 1, 1)
+    elif tensor.shape[0] > 3:
+        tensor = tensor[:3]
+    if int(tensor.shape[1]) != image_size or int(tensor.shape[2]) != image_size:
+        tensor = tvf.resize(tensor, [image_size, image_size], antialias=True)
+    return tensor.clamp(0.0, 1.0)
 
 
 def _to_tensor(image: Any) -> torch.Tensor:
     if isinstance(image, torch.Tensor):
         tensor = image.detach().clone()
         if tensor.ndim == 3 and tensor.dtype.is_floating_point:
-            return tensor
+            return _normalize_image_tensor(tensor.float())
         if tensor.ndim == 3:
-            return tensor.float() / 255.0
+            return _normalize_image_tensor(tensor.float() / 255.0)
         raise ValueError("Expected image tensors to use CHW layout.")
-    return tvf.to_tensor(image)
+    return _normalize_image_tensor(tvf.to_tensor(image))
 
 
 def _load_record_image(record: SampleManifestRecord, source_datasets: Mapping[str, object]) -> torch.Tensor:
@@ -515,6 +742,8 @@ class ManifestBackedVisionDataset(Dataset[ManifestSample]):
             source_sample_indices=record.source_sample_indices,
             augmentation_recipe=record.augmentation_recipe,
             source_class_label=record.source_class_label,
+            source_domain_name=record.source_domain_name,
+            source_domain_label=record.source_domain_label,
             candidate_class_mask=candidate_class_mask,
         )
 
@@ -541,6 +770,8 @@ def collate_manifest_samples(samples: list[ManifestSample]) -> BatchInput:
         cohort_name=[sample.cohort_name for sample in samples],
         source_dataset_name=[sample.source_dataset_name for sample in samples],
         source_class_label=[sample.source_class_label for sample in samples],
+        source_domain_name=[sample.source_domain_name for sample in samples],
+        source_domain_label=[sample.source_domain_label for sample in samples],
         source_dataset_split=[sample.source_dataset_split for sample in samples],
         source_role=[sample.source_role for sample in samples],
         source_partition_name=[sample.source_partition_name for sample in samples],
@@ -555,15 +786,18 @@ def summarize_manifest(records: Iterable[SampleManifestRecord]) -> dict[str, Any
     split_counts: dict[str, int] = defaultdict(int)
     source_role_counts: dict[str, int] = defaultdict(int)
     source_dataset_counts: dict[str, int] = defaultdict(int)
+    source_domain_counts: dict[str, int] = defaultdict(int)
     for record in records:
         cohort_counts[record.cohort_name] += 1
         split_counts[record.split_name] += 1
         source_role_counts[record.source_role] += 1
         source_dataset_counts[record.source_dataset_name] += 1
+        source_domain_counts[record.source_domain_name] += 1
     return {
         "cohort_counts": dict(sorted(cohort_counts.items())),
         "split_counts": dict(sorted(split_counts.items())),
         "source_dataset_counts": dict(sorted(source_dataset_counts.items())),
+        "source_domain_counts": dict(sorted(source_domain_counts.items())),
         "source_role_counts": dict(sorted(source_role_counts.items())),
     }
 

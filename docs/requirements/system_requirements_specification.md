@@ -98,6 +98,9 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-FN-040`: V0.5 validation 与 final-test manifests 必须按底层 source fingerprint 保持零交叉
 - `REQ-FN-041`: 系统必须支持 final-only unseen OOD source, V0.5 默认使用 CIFAR-100 test
 - `REQ-FN-042`: frozen matched benchmark 必须能按 `source_role` / `source_dataset_name` 输出 seen OOD、unseen OOD 与 all OOD slices
+- `REQ-FN-043`: 系统必须支持 V0.6 multi-source unknown supervision, 至少覆盖 SVHN、DTD、LSUN-resize 与 synthetic noise
+- `REQ-FN-044`: 训练 dataloader 必须支持 source-balanced batch sampling, 防止单一 OOD source 主导 unknown objective
+- `REQ-FN-045`: V0.6 aggregate 必须输出 worst-source AUROC、seen-unseen gap 与 pair-scalar delta
 
 ## 4. 非功能需求
 
@@ -117,6 +120,7 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-SCI-006`: `plan_a_next_v0_2` final test 的 pair AUROC 应达到 `0.95`, 并比 best one-feature scalar 高至少 `0.02`
 - `REQ-SCI-007`: `plan_a_next_v0_2` final test 应达到 easy top-1 `0.60`, hard top-1 `0.45`, ambiguous hit `0.75`; 未达标时必须标记 partial/negative evidence
 - `REQ-SCI-008`: `plan_a_next_v0_5` 不得从 SVHN-only evidence 声称 unseen OOD 泛化; unseen OOD 结论必须来自 final-only CIFAR-100 slice
+- `REQ-SCI-009`: `plan_a_next_v0_6` 以 unseen CIFAR-100 AUROC、worst-source AUROC 与 seen-unseen gap 作为主修复指标
 
 ## 6. 关键开放问题
 

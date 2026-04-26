@@ -108,6 +108,12 @@ def move_batch_to_device(batch_input: BatchInput, runtime_spec: RuntimeSpec) -> 
         cohort_name=list(batch_input.cohort_name),
         source_dataset_name=list(batch_input.source_dataset_name),
         source_class_label=list(batch_input.source_class_label) if batch_input.source_class_label is not None else None,
+        source_domain_name=list(batch_input.source_domain_name)
+        if batch_input.source_domain_name is not None
+        else None,
+        source_domain_label=list(batch_input.source_domain_label)
+        if batch_input.source_domain_label is not None
+        else None,
         source_dataset_split=list(batch_input.source_dataset_split)
         if batch_input.source_dataset_split is not None
         else None,

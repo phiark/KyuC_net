@@ -39,8 +39,16 @@ class StudyRunMetric:
     ambiguous_candidate_hit_rate: float
     run_output_dir: str
     seen_ood_pair_auroc: float = math.nan
+    seen_ood_svhn_pair_auroc: float = math.nan
+    seen_ood_dtd_pair_auroc: float = math.nan
+    seen_ood_lsun_resize_pair_auroc: float = math.nan
+    seen_ood_gaussian_noise_pair_auroc: float = math.nan
     unseen_ood_pair_auroc: float = math.nan
+    unseen_ood_cifar100_pair_auroc: float = math.nan
     all_ood_pair_auroc: float = math.nan
+    worst_source_pair_auroc: float = math.nan
+    seen_unseen_gap: float = math.nan
+    pair_scalar_delta: float = math.nan
 
     def to_csv_row(self) -> dict[str, str | int | float]:
         return {
@@ -55,8 +63,16 @@ class StudyRunMetric:
             "hard_id_top1_accuracy": self.hard_id_top1_accuracy,
             "ambiguous_candidate_hit_rate": self.ambiguous_candidate_hit_rate,
             "seen_ood_pair_auroc": self.seen_ood_pair_auroc,
+            "seen_ood_svhn_pair_auroc": self.seen_ood_svhn_pair_auroc,
+            "seen_ood_dtd_pair_auroc": self.seen_ood_dtd_pair_auroc,
+            "seen_ood_lsun_resize_pair_auroc": self.seen_ood_lsun_resize_pair_auroc,
+            "seen_ood_gaussian_noise_pair_auroc": self.seen_ood_gaussian_noise_pair_auroc,
             "unseen_ood_pair_auroc": self.unseen_ood_pair_auroc,
+            "unseen_ood_cifar100_pair_auroc": self.unseen_ood_cifar100_pair_auroc,
             "all_ood_pair_auroc": self.all_ood_pair_auroc,
+            "worst_source_pair_auroc": self.worst_source_pair_auroc,
+            "seen_unseen_gap": self.seen_unseen_gap,
+            "pair_scalar_delta": self.pair_scalar_delta,
             "run_output_dir": self.run_output_dir,
         }
 
@@ -76,8 +92,16 @@ class CheckpointPolicyMetric:
     ambiguous_candidate_hit_rate: float
     run_output_dir: str
     seen_ood_pair_auroc: float = math.nan
+    seen_ood_svhn_pair_auroc: float = math.nan
+    seen_ood_dtd_pair_auroc: float = math.nan
+    seen_ood_lsun_resize_pair_auroc: float = math.nan
+    seen_ood_gaussian_noise_pair_auroc: float = math.nan
     unseen_ood_pair_auroc: float = math.nan
+    unseen_ood_cifar100_pair_auroc: float = math.nan
     all_ood_pair_auroc: float = math.nan
+    worst_source_pair_auroc: float = math.nan
+    seen_unseen_gap: float = math.nan
+    pair_scalar_delta: float = math.nan
 
     def to_csv_row(self) -> dict[str, str | int | float]:
         return {
@@ -93,8 +117,16 @@ class CheckpointPolicyMetric:
             "hard_id_top1_accuracy": self.hard_id_top1_accuracy,
             "ambiguous_candidate_hit_rate": self.ambiguous_candidate_hit_rate,
             "seen_ood_pair_auroc": self.seen_ood_pair_auroc,
+            "seen_ood_svhn_pair_auroc": self.seen_ood_svhn_pair_auroc,
+            "seen_ood_dtd_pair_auroc": self.seen_ood_dtd_pair_auroc,
+            "seen_ood_lsun_resize_pair_auroc": self.seen_ood_lsun_resize_pair_auroc,
+            "seen_ood_gaussian_noise_pair_auroc": self.seen_ood_gaussian_noise_pair_auroc,
             "unseen_ood_pair_auroc": self.unseen_ood_pair_auroc,
+            "unseen_ood_cifar100_pair_auroc": self.unseen_ood_cifar100_pair_auroc,
             "all_ood_pair_auroc": self.all_ood_pair_auroc,
+            "worst_source_pair_auroc": self.worst_source_pair_auroc,
+            "seen_unseen_gap": self.seen_unseen_gap,
+            "pair_scalar_delta": self.pair_scalar_delta,
             "run_output_dir": self.run_output_dir,
         }
 
@@ -107,8 +139,16 @@ AGGREGATE_METRIC_NAMES = (
     "hard_id_top1_accuracy",
     "ambiguous_candidate_hit_rate",
     "seen_ood_pair_auroc",
+    "seen_ood_svhn_pair_auroc",
+    "seen_ood_dtd_pair_auroc",
+    "seen_ood_lsun_resize_pair_auroc",
+    "seen_ood_gaussian_noise_pair_auroc",
     "unseen_ood_pair_auroc",
+    "unseen_ood_cifar100_pair_auroc",
     "all_ood_pair_auroc",
+    "worst_source_pair_auroc",
+    "seen_unseen_gap",
+    "pair_scalar_delta",
 )
 
 
@@ -453,27 +493,94 @@ def _optional_pair_auroc(report_output: Mapping[str, Any], artifact_key: str) ->
     return float(_single_csv_row(path)["pair_auroc"])
 
 
+def _mean_non_nan(values: Sequence[float]) -> float:
+    filtered = [float(value) for value in values if not math.isnan(float(value))]
+    if not filtered:
+        return math.nan
+    return mean(filtered)
+
+
+def _min_non_nan(values: Sequence[float]) -> float:
+    filtered = [float(value) for value in values if not math.isnan(float(value))]
+    if not filtered:
+        return math.nan
+    return min(filtered)
+
+
+def _collect_source_slice_rows(
+    *,
+    study_id: str,
+    seed: int,
+    run_output: Mapping[str, Any],
+) -> list[dict[str, str | int | float]]:
+    rows: list[dict[str, str | int | float]] = []
+    report_output = dict(run_output["report"])
+    for artifact_key, artifact_path in sorted(report_output.items()):
+        if artifact_key == "matched_ambiguous_vs_ood_table" or not artifact_key.endswith("_matched_table"):
+            continue
+        path = Path(str(artifact_path))
+        if not path.exists():
+            continue
+        matched_row = _single_csv_row(path)
+        rows.append(
+            {
+                "study_id": study_id,
+                "run_id": str(run_output["run_id"]),
+                "seed": seed,
+                "benchmark_name": artifact_key.removesuffix("_matched_table"),
+                "pair_auroc": float(matched_row["pair_auroc"]),
+                "scalar_auroc": float(matched_row["scalar_auroc"]),
+                "pair_scalar_delta": float(matched_row["pair_auroc"]) - float(matched_row["scalar_auroc"]),
+                "matched_count_per_class": int(matched_row["matched_count_per_class"]),
+                "num_ambiguous": int(matched_row["num_ambiguous"]),
+                "num_ood": int(matched_row["num_ood"]),
+                "table_path": str(path),
+            }
+        )
+    return rows
+
+
 def _collect_run_metric(study_id: str, seed: int, run_output: Mapping[str, Any]) -> StudyRunMetric:
     matched_row = _single_csv_row(run_output["report"]["matched_ambiguous_vs_ood_table"])
     proposition_path = run_output["analysis"]["proposition_path"]
+    seen_svhn = _optional_pair_auroc(run_output["report"], "ambiguous_vs_seen_ood_svhn_matched_table")
+    seen_dtd = _optional_pair_auroc(run_output["report"], "ambiguous_vs_seen_ood_dtd_matched_table")
+    seen_lsun = _optional_pair_auroc(run_output["report"], "ambiguous_vs_seen_ood_lsun_resize_matched_table")
+    seen_noise = _optional_pair_auroc(
+        run_output["report"],
+        "ambiguous_vs_seen_ood_gaussian_noise_matched_table",
+    )
+    unseen_cifar100 = _optional_pair_auroc(
+        run_output["report"],
+        "ambiguous_vs_unseen_ood_cifar100_matched_table",
+    )
+    seen_mean = _mean_non_nan((seen_svhn, seen_dtd, seen_lsun, seen_noise))
+    source_values = (seen_svhn, seen_dtd, seen_lsun, seen_noise, unseen_cifar100)
+    pair_auroc = float(matched_row["pair_auroc"])
+    scalar_auroc = float(matched_row["scalar_auroc"])
     return StudyRunMetric(
         study_id=study_id,
         model_family=str(matched_row.get("model_family", run_output.get("model_family", "frcnet_explicit_unknown"))),
         run_id=str(run_output["run_id"]),
         seed=seed,
-        pair_auroc=float(matched_row["pair_auroc"]),
+        pair_auroc=pair_auroc,
         weighted_pair_auroc=float(matched_row["weighted_pair_auroc"]),
-        scalar_auroc=float(matched_row["scalar_auroc"]),
+        scalar_auroc=scalar_auroc,
         easy_id_top1_accuracy=_proposition_accuracy(proposition_path, "easy_id"),
         hard_id_top1_accuracy=_proposition_accuracy(proposition_path, "hard_id"),
         ambiguous_candidate_hit_rate=_proposition_accuracy(proposition_path, "ambiguous_id"),
         run_output_dir=str(run_output["output_dir"]),
-        seen_ood_pair_auroc=_optional_pair_auroc(run_output["report"], "ambiguous_vs_seen_ood_svhn_matched_table"),
-        unseen_ood_pair_auroc=_optional_pair_auroc(
-            run_output["report"],
-            "ambiguous_vs_unseen_ood_cifar100_matched_table",
-        ),
+        seen_ood_pair_auroc=seen_mean,
+        seen_ood_svhn_pair_auroc=seen_svhn,
+        seen_ood_dtd_pair_auroc=seen_dtd,
+        seen_ood_lsun_resize_pair_auroc=seen_lsun,
+        seen_ood_gaussian_noise_pair_auroc=seen_noise,
+        unseen_ood_pair_auroc=unseen_cifar100,
+        unseen_ood_cifar100_pair_auroc=unseen_cifar100,
         all_ood_pair_auroc=_optional_pair_auroc(run_output["report"], "ambiguous_vs_all_ood_matched_table"),
+        worst_source_pair_auroc=_min_non_nan(source_values),
+        seen_unseen_gap=math.nan if math.isnan(seen_mean) or math.isnan(unseen_cifar100) else seen_mean - unseen_cifar100,
+        pair_scalar_delta=pair_auroc - scalar_auroc,
     )
 
 
@@ -490,25 +597,41 @@ def _collect_policy_metric(
 ) -> CheckpointPolicyMetric:
     matched_row = _single_csv_row(report_output["matched_ambiguous_vs_ood_table"])
     proposition_path = analysis_output["proposition_path"]
+    seen_values = (
+        _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_svhn_matched_table"),
+        _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_dtd_matched_table"),
+        _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_lsun_resize_matched_table"),
+        _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_gaussian_noise_matched_table"),
+    )
+    seen_svhn, seen_dtd, seen_lsun, seen_noise = seen_values
+    unseen_cifar100 = _optional_pair_auroc(report_output, "ambiguous_vs_unseen_ood_cifar100_matched_table")
+    seen_mean = _mean_non_nan(seen_values)
+    pair_auroc = float(matched_row["pair_auroc"])
+    scalar_auroc = float(matched_row["scalar_auroc"])
     return CheckpointPolicyMetric(
         study_id=study_id,
         model_family=str(matched_row.get("model_family", fallback_model_family)),
         run_id=run_id,
         seed=seed,
         policy_name=policy_name,
-        pair_auroc=float(matched_row["pair_auroc"]),
+        pair_auroc=pair_auroc,
         weighted_pair_auroc=float(matched_row["weighted_pair_auroc"]),
-        scalar_auroc=float(matched_row["scalar_auroc"]),
+        scalar_auroc=scalar_auroc,
         easy_id_top1_accuracy=_proposition_accuracy(proposition_path, "easy_id"),
         hard_id_top1_accuracy=_proposition_accuracy(proposition_path, "hard_id"),
         ambiguous_candidate_hit_rate=_proposition_accuracy(proposition_path, "ambiguous_id"),
         run_output_dir=str(run_root),
-        seen_ood_pair_auroc=_optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_svhn_matched_table"),
-        unseen_ood_pair_auroc=_optional_pair_auroc(
-            report_output,
-            "ambiguous_vs_unseen_ood_cifar100_matched_table",
-        ),
+        seen_ood_pair_auroc=seen_mean,
+        seen_ood_svhn_pair_auroc=seen_svhn,
+        seen_ood_dtd_pair_auroc=seen_dtd,
+        seen_ood_lsun_resize_pair_auroc=seen_lsun,
+        seen_ood_gaussian_noise_pair_auroc=seen_noise,
+        unseen_ood_pair_auroc=unseen_cifar100,
+        unseen_ood_cifar100_pair_auroc=unseen_cifar100,
         all_ood_pair_auroc=_optional_pair_auroc(report_output, "ambiguous_vs_all_ood_matched_table"),
+        worst_source_pair_auroc=_min_non_nan((*seen_values, unseen_cifar100)),
+        seen_unseen_gap=math.nan if math.isnan(seen_mean) or math.isnan(unseen_cifar100) else seen_mean - unseen_cifar100,
+        pair_scalar_delta=pair_auroc - scalar_auroc,
     )
 
 
@@ -548,6 +671,54 @@ def _write_metric_summary(metrics: Sequence[StudyRunMetric], output_path: str | 
                     "std": 0.0 if len(values) == 1 else pstdev(values),
                     "min": min(values),
                     "max": max(values),
+                }
+            )
+    return output
+
+
+def _write_source_slice_metrics(rows: Sequence[Mapping[str, str | int | float]], output_path: str | Path) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "study_id",
+        "run_id",
+        "seed",
+        "benchmark_name",
+        "pair_auroc",
+        "scalar_auroc",
+        "pair_scalar_delta",
+        "matched_count_per_class",
+        "num_ambiguous",
+        "num_ood",
+        "table_path",
+    ]
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({fieldname: row.get(fieldname, "") for fieldname in fieldnames})
+    return output
+
+
+def _write_source_slice_summary(rows: Sequence[Mapping[str, str | int | float]], output_path: str | Path) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    grouped: dict[str, list[float]] = {}
+    for row in rows:
+        benchmark_name = str(row["benchmark_name"])
+        grouped.setdefault(benchmark_name, []).append(float(row["pair_auroc"]))
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        fieldnames = ["benchmark_name", "mean_pair_auroc", "std_pair_auroc", "min_pair_auroc", "max_pair_auroc"]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for benchmark_name, values in sorted(grouped.items()):
+            writer.writerow(
+                {
+                    "benchmark_name": benchmark_name,
+                    "mean_pair_auroc": mean(values),
+                    "std_pair_auroc": 0.0 if len(values) == 1 else pstdev(values),
+                    "min_pair_auroc": min(values),
+                    "max_pair_auroc": max(values),
                 }
             )
     return output
@@ -696,6 +867,15 @@ def aggregate_plan_a_study_bundle(
         _collect_run_metric(str(study_paths["study_id"]), seed, run_output)
         for seed, run_output in zip(seeds, run_outputs, strict=True)
     ]
+    source_slice_rows: list[dict[str, str | int | float]] = []
+    for seed, run_output in zip(seeds, run_outputs, strict=True):
+        source_slice_rows.extend(
+            _collect_source_slice_rows(
+                study_id=str(study_paths["study_id"]),
+                seed=seed,
+                run_output=run_output,
+            )
+        )
     policy_metrics: list[CheckpointPolicyMetric] = []
     for seed, run_output in zip(seeds, run_outputs, strict=True):
         policy_outputs = dict(run_output.get("policy_outputs", {}))
@@ -721,6 +901,14 @@ def aggregate_plan_a_study_bundle(
 
     seed_metrics_path = _write_seed_metrics(metrics, output_root / "seed_metrics.csv")
     metric_summary_path = _write_metric_summary(metrics, output_root / "metric_summary.csv")
+    source_slice_metrics_path = _write_source_slice_metrics(
+        source_slice_rows,
+        output_root / "source_slice_metrics.csv",
+    )
+    source_slice_summary_path = _write_source_slice_summary(
+        source_slice_rows,
+        output_root / "source_slice_summary.csv",
+    )
     checkpoint_policy_metrics_path = _write_checkpoint_policy_metrics(
         policy_metrics,
         output_root / "checkpoint_policy_metrics.csv",
@@ -772,6 +960,8 @@ def aggregate_plan_a_study_bundle(
     artifact_paths = {
         "seed_metrics": str(seed_metrics_path),
         "metric_summary": str(metric_summary_path),
+        "source_slice_metrics": str(source_slice_metrics_path),
+        "source_slice_summary": str(source_slice_summary_path),
         "checkpoint_policy_metrics": str(checkpoint_policy_metrics_path),
         "checkpoint_policy_summary": str(checkpoint_policy_summary_path),
         "checkpoint_policy_gap_summary": str(checkpoint_policy_gap_summary_path),
@@ -829,6 +1019,8 @@ def aggregate_plan_a_study_bundle(
         "output_dir": str(output_root),
         "seed_metrics_path": str(seed_metrics_path),
         "metric_summary_path": str(metric_summary_path),
+        "source_slice_metrics_path": str(source_slice_metrics_path),
+        "source_slice_summary_path": str(source_slice_summary_path),
         "checkpoint_policy_metrics_path": str(checkpoint_policy_metrics_path),
         "checkpoint_policy_summary_path": str(checkpoint_policy_summary_path),
         "checkpoint_policy_gap_summary_path": str(checkpoint_policy_gap_summary_path),

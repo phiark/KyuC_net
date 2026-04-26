@@ -77,7 +77,9 @@ def main() -> int:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     record_dir.mkdir(parents=True, exist_ok=True)
 
-    source_datasets = load_plan_a_source_datasets(protocol_config)
+    reference_protocol_config = dict(protocol_config)
+    reference_protocol_config["datasets"] = {"cifar10": protocol_config["datasets"]["cifar10"]}
+    source_datasets = load_plan_a_source_datasets(reference_protocol_config)
     train_dataset = _IdentityClassDataset(source_datasets["cifar10"])
     dataloader_config = dict(reference_config.get("dataloader", {}))
     dataloader = DataLoader(

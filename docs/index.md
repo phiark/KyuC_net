@@ -35,6 +35,7 @@
 - [Plan A Next v0.2 协议](architecture/plan_a_next_v0_2_protocol.md)
 - [Plan A Next v0.4 semantic repair plan](architecture/plan_a_next_v0_4_semantic_repair_plan.md)
 - [Plan A Next v0.5 evidence repair protocol](architecture/plan_a_next_v0_5_evidence_repair_protocol.md)
+- [Plan A Next v0.6 multisource LOSO protocol](architecture/plan_a_next_v0_6_multisource_loso_protocol.md)
 - [方案 A v0.3 研究协议](architecture/plan_a_v0_3_protocol.md)
 - [方案 A v0.3debug 理论对齐协议](architecture/plan_a_v0_3debug_protocol.md)
 - [方案 A v0.3debug R2 协议](architecture/plan_a_v0_3debug_r2_protocol.md)
@@ -55,11 +56,13 @@
 - [ADR-0005 v0.3debug R2 benchmark 与 geometry 修复](../records/decisions/adr_0005_v0_3debug_r2_benchmark_and_geometry_repair.md)
 - [ADR-0006 Plan A Next v0.2 data semantic baseline](../records/decisions/adr_0006_plan_a_next_v0_2_data_semantic_baseline.md)
 - [ADR-0007 Plan A Next v0.5 evidence repair](../records/decisions/adr_0007_plan_a_next_v0_5_evidence_repair.md)
+- [ADR-0008 Plan A Next v0.6 multisource LOSO](../records/decisions/adr_0008_plan_a_next_v0_6_multisource_loso.md)
 - [2026-04-24 Plan A Next v0.2 issue ledger](../records/reviews/2026-04-24_review_plan_a_next_v0_2_issue_ledger.md)
 - [2026-04-25 Literature and project alignment review](../records/reviews/2026-04-25_review_literature_project_alignment.md)
 - [2026-04-25 V4.0 strict freeze scope control](../records/reviews/2026-04-25_review_v0_4_strict_freeze_scope_control.md)
 - [2026-04-25 V4.0 strict freeze local proof](../records/reviews/2026-04-25_review_v0_4_strict_freeze_local_proof.md)
 - [2026-04-26 V0.5 evidence repair scope](../records/reviews/2026-04-26_review_v0_5_evidence_repair_scope.md)
+- [2026-04-26 V0.6 multisource LOSO scope](../records/reviews/2026-04-26_review_v0_6_multisource_loso_scope.md)
 
 ### 3.6 Templates
 

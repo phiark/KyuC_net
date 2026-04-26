@@ -32,6 +32,7 @@ from frcnet.analysis import (
 )
 from frcnet.data import (
     ManifestBackedVisionDataset,
+    SourceBalancedBatchSampler,
     build_plan_a_manifest,
     collate_manifest_samples,
     load_plan_a_source_datasets,
@@ -63,6 +64,7 @@ from frcnet.training import run_train_step
 from frcnet.utils import resolve_pin_memory, resolve_runtime
 
 TRAINABLE_COHORT_NAMES = frozenset({"easy_id", "hard_id", "ambiguous_id", "unknown_supervision"})
+DOWNLOAD_OVERRIDABLE_DATASETS = frozenset({"cifar10", "svhn", "cifar100", "dtd", "lsun_resize"})
 
 
 @dataclass(slots=True)
@@ -399,6 +401,35 @@ def _build_manifest_dataloader(
     num_workers = int(dataloader_config.get("num_workers", 0))
     persistent_workers = bool(dataloader_config.get("persistent_workers", False) and num_workers > 0)
     pin_memory_setting = dataloader_config.get("pin_memory", runtime_config.get("pin_memory", "auto"))
+    if bool(dataloader_config.get("source_balanced_sampling", False)):
+        composition_config = dict(dataloader_config.get("batch_composition", {}))
+        batch_sampler = SourceBalancedBatchSampler(
+            list(manifest_records),
+            batch_size=batch_size,
+            batches_per_epoch=(
+                None
+                if dataloader_config.get("batches_per_epoch") is None
+                else int(dataloader_config["batches_per_epoch"])
+            ),
+            seed=int(generator_seed if generator_seed is not None else dataloader_config.get("seed", 7)),
+            shuffle=shuffle,
+            id_fraction=float(composition_config.get("id_fraction", dataloader_config.get("id_fraction", 0.25))),
+            ambiguous_fraction=float(
+                composition_config.get("ambiguous_fraction", dataloader_config.get("ambiguous_fraction", 0.25))
+            ),
+            ood_fraction=float(composition_config.get("ood_fraction", dataloader_config.get("ood_fraction", 0.50))),
+            id_cohorts=tuple(dataloader_config.get("id_cohorts", ("easy_id", "hard_id"))),
+            ambiguous_cohorts=tuple(dataloader_config.get("ambiguous_cohorts", ("ambiguous_id",))),
+            ood_cohorts=tuple(dataloader_config.get("ood_cohorts", ("unknown_supervision", "ood"))),
+        )
+        return DataLoader(
+            dataset,
+            batch_sampler=batch_sampler,
+            num_workers=num_workers,
+            persistent_workers=persistent_workers,
+            pin_memory=resolve_pin_memory(pin_memory_setting, runtime_spec),
+            collate_fn=collate_manifest_samples,
+        )
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -998,8 +1029,9 @@ def prepare_plan_a_datasets(
             for dataset_name, dataset_config in protocol_config["datasets"].items()
         }
         if download_override is not None:
-            for dataset_config in datasets_config.values():
-                dataset_config["download"] = download_override
+            for dataset_name, dataset_config in datasets_config.items():
+                if dataset_name in DOWNLOAD_OVERRIDABLE_DATASETS:
+                    dataset_config["download"] = download_override
         protocol_with_override = dict(protocol_config)
         protocol_with_override["datasets"] = datasets_config
         loaded_datasets = load_plan_a_source_datasets(protocol_with_override)
@@ -1009,9 +1041,10 @@ def prepare_plan_a_datasets(
             split_marker = "train" if dataset_name == "cifar10" else str(dataset_config.get("split", "test"))
             if dataset_name == "cifar10":
                 split_marker = "train" if bool(dataset_config.get("train", False)) else "test"
+            root_marker = str(Path(dataset_config["root"]).resolve()) if "root" in dataset_config else f"<synthetic:{dataset_name}>"
             dataset_key = (
                 dataset_name,
-                str(Path(dataset_config["root"]).resolve()),
+                root_marker,
                 split_marker,
                 bool(dataset_config.get("download", False)),
             )
@@ -1021,7 +1054,7 @@ def prepare_plan_a_datasets(
             report_items.append(
                 {
                     "dataset_name": dataset_name,
-                    "root": str(Path(dataset_config["root"]).resolve()),
+                    "root": root_marker,
                     "split": split_marker,
                     "download": bool(dataset_config.get("download", False)),
                     "num_samples": len(dataset_object),
