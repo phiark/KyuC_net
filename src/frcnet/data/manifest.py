@@ -21,6 +21,9 @@ class SampleManifestRecord:
     augmentation_recipe: str = "identity"
     augmentation_parameters: dict[str, Any] = field(default_factory=dict)
     source_class_labels: tuple[int, ...] = ()
+    source_dataset_split: str = ""
+    source_role: str = ""
+    source_partition_name: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -29,7 +32,11 @@ class SampleManifestRecord:
             "split_name": self.split_name,
             "cohort_name": self.cohort_name,
             "source_dataset_name": self.source_dataset_name,
+            "source_dataset_split": self.source_dataset_split,
+            "source_role": self.source_role,
+            "source_partition_name": self.source_partition_name,
             "source_sample_indices": list(self.source_sample_indices),
+            "source_sample_indices_json": json.dumps(list(self.source_sample_indices)),
             "source_class_label": self.source_class_label,
             "class_label": self.class_label,
             "candidate_class_indices": list(self.candidate_class_indices),
@@ -46,13 +53,19 @@ class SampleManifestRecord:
             split_name=payload["split_name"],
             cohort_name=payload["cohort_name"],
             source_dataset_name=payload["source_dataset_name"],
-            source_sample_indices=tuple(payload["source_sample_indices"]),
+            source_sample_indices=tuple(
+                payload.get("source_sample_indices")
+                or json.loads(str(payload.get("source_sample_indices_json", "[]")))
+            ),
             source_class_label=payload.get("source_class_label"),
             class_label=payload["class_label"],
             candidate_class_indices=tuple(payload.get("candidate_class_indices", [])),
             augmentation_recipe=payload.get("augmentation_recipe", "identity"),
             augmentation_parameters=dict(payload.get("augmentation_parameters", {})),
             source_class_labels=tuple(payload.get("source_class_labels", [])),
+            source_dataset_split=str(payload.get("source_dataset_split", payload.get("source_split", ""))),
+            source_role=str(payload.get("source_role", "")),
+            source_partition_name=str(payload.get("source_partition_name", "")),
         )
 
 
@@ -95,3 +108,18 @@ def validate_manifest_records(records: Iterable[SampleManifestRecord]) -> list[S
         raise ValueError(f"Manifest must use unique sample_id values. Duplicates: {preview}")
 
     return materialized_records
+
+
+def source_fingerprints(records: Iterable[SampleManifestRecord]) -> set[tuple[str, str, int]]:
+    fingerprints: set[tuple[str, str, int]] = set()
+    for record in records:
+        for source_index in record.source_sample_indices:
+            fingerprints.add((record.source_dataset_name, record.source_dataset_split, int(source_index)))
+    return fingerprints
+
+
+def source_fingerprint_overlap(
+    left_records: Iterable[SampleManifestRecord],
+    right_records: Iterable[SampleManifestRecord],
+) -> set[tuple[str, str, int]]:
+    return source_fingerprints(left_records) & source_fingerprints(right_records)

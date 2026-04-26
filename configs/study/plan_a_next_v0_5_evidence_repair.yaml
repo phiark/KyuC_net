@@ -1,0 +1,18 @@
+study:
+  study_id: plan_a_next_v0_5_evidence_repair_main
+  model_family: frcnet_explicit_unknown
+  output_root: artifacts/studies
+  seeds: [7, 17, 27]
+  train_protocol_config: configs/protocol/plan_a_next_v0_5_train.yaml
+  validation_protocol_config: configs/protocol/plan_a_next_v0_5_validation.yaml
+  analysis_protocol_config: configs/protocol/plan_a_next_v0_5_test.yaml
+  final_test_protocol_config: configs/protocol/plan_a_next_v0_5_test.yaml
+  model_config: configs/model/frcnet_resnet18_base.yaml
+  train_config: configs/train/plan_a_next_v0_2_curriculum.yaml
+  eval_config: configs/eval/plan_a_next_v0_5_evidence_repair.yaml
+  analysis_config: configs/analysis/plan_a_next_v0_2_artifacts.yaml
+  reference_config: configs/reference/plan_a_next_v0_5_softmax_ce_reference.yaml
+  report_policy:
+    ranking_metric: all_ood_pair_auroc
+    primary_checkpoint_policy: balanced
+    companion_checkpoint_policies: [theory]

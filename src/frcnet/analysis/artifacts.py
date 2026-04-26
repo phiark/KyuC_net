@@ -297,6 +297,53 @@ def write_cohort_summary_table(records: list[SampleAnalysisRecord], output_path:
     return output
 
 
+def write_source_slice_summary_table(records: list[SampleAnalysisRecord], output_path: str | Path) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    grouped: dict[tuple[str, str, str, str], list[SampleAnalysisRecord]] = defaultdict(list)
+    for record in records:
+        grouped[
+            (
+                record.cohort_name,
+                record.source_role,
+                record.source_dataset_name,
+                record.augmentation_recipe,
+            )
+        ].append(record)
+
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        fieldnames = [
+            "cohort_name",
+            "source_role",
+            "source_dataset_name",
+            "augmentation_recipe",
+            "count",
+            "mean_resolution_ratio",
+            "mean_unknown_mass",
+            "mean_state_content_entropy",
+            "mean_state_weighted_content_entropy",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for (cohort_name, source_role, source_dataset_name, augmentation_recipe), slice_records in sorted(grouped.items()):
+            writer.writerow(
+                {
+                    "cohort_name": cohort_name,
+                    "source_role": source_role,
+                    "source_dataset_name": source_dataset_name,
+                    "augmentation_recipe": augmentation_recipe,
+                    "count": len(slice_records),
+                    "mean_resolution_ratio": mean(record.resolution_ratio for record in slice_records),
+                    "mean_unknown_mass": mean(record.unknown_mass for record in slice_records),
+                    "mean_state_content_entropy": mean(record.state_content_entropy for record in slice_records),
+                    "mean_state_weighted_content_entropy": mean(
+                        record.state_weighted_content_entropy for record in slice_records
+                    ),
+                }
+            )
+    return output
+
+
 def write_completion_scan_table(
     records: list[SampleAnalysisRecord],
     output_path: str | Path,

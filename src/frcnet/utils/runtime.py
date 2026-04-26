@@ -108,5 +108,18 @@ def move_batch_to_device(batch_input: BatchInput, runtime_spec: RuntimeSpec) -> 
         cohort_name=list(batch_input.cohort_name),
         source_dataset_name=list(batch_input.source_dataset_name),
         source_class_label=list(batch_input.source_class_label) if batch_input.source_class_label is not None else None,
+        source_dataset_split=list(batch_input.source_dataset_split)
+        if batch_input.source_dataset_split is not None
+        else None,
+        source_role=list(batch_input.source_role) if batch_input.source_role is not None else None,
+        source_partition_name=list(batch_input.source_partition_name)
+        if batch_input.source_partition_name is not None
+        else None,
+        source_sample_indices=list(batch_input.source_sample_indices)
+        if batch_input.source_sample_indices is not None
+        else None,
+        augmentation_recipe=list(batch_input.augmentation_recipe)
+        if batch_input.augmentation_recipe is not None
+        else None,
         candidate_class_mask=candidate_class_mask,
     )

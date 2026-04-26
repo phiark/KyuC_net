@@ -96,6 +96,17 @@ def build_sample_analysis_records(
         source_class_label = None
         if batch_input.source_class_label is not None:
             source_class_label = batch_input.source_class_label[index]
+        source_dataset_split = "" if batch_input.source_dataset_split is None else batch_input.source_dataset_split[index]
+        source_role = "" if batch_input.source_role is None else batch_input.source_role[index]
+        source_partition_name = (
+            "" if batch_input.source_partition_name is None else batch_input.source_partition_name[index]
+        )
+        source_sample_indices = (
+            ()
+            if batch_input.source_sample_indices is None
+            else tuple(int(value) for value in batch_input.source_sample_indices[index])
+        )
+        augmentation_recipe = "" if batch_input.augmentation_recipe is None else batch_input.augmentation_recipe[index]
 
         record_list.append(
             SampleAnalysisRecord(
@@ -131,6 +142,11 @@ def build_sample_analysis_records(
                 top1_completion_beta_0_5=float(score_beta_0_5[index].item()),
                 top1_completion_beta_0_75=float(score_beta_0_75[index].item()),
                 candidate_class_indices=candidate_indices,
+                source_dataset_split=source_dataset_split,
+                source_role=source_role,
+                source_partition_name=source_partition_name,
+                source_sample_indices=source_sample_indices,
+                augmentation_recipe=augmentation_recipe,
             )
         )
     return record_list

@@ -23,6 +23,9 @@ class MatchedManifestRecord:
     manifest_hash: str
     construction_config_hash: str
     source_dataset_name: str = ""
+    source_dataset_split: str = ""
+    source_role: str = ""
+    source_partition_name: str = ""
     source_index: int | None = None
 
     def to_dict(self) -> dict[str, str | float | int | None]:
@@ -30,6 +33,9 @@ class MatchedManifestRecord:
             "sample_id": self.sample_id,
             "cohort_name": self.cohort_name,
             "source_dataset_name": self.source_dataset_name,
+            "source_dataset_split": self.source_dataset_split,
+            "source_role": self.source_role,
+            "source_partition_name": self.source_partition_name,
             "source_index": self.source_index,
             "reference_score_name": self.reference_score_name,
             "reference_score_value": self.reference_score_value,
@@ -46,6 +52,9 @@ class MatchedManifestRecord:
             sample_id=str(payload["sample_id"]),
             cohort_name=str(payload["cohort_name"]),
             source_dataset_name=str(payload.get("source_dataset_name", "")),
+            source_dataset_split=str(payload.get("source_dataset_split", "")),
+            source_role=str(payload.get("source_role", "")),
+            source_partition_name=str(payload.get("source_partition_name", "")),
             source_index=None if payload.get("source_index") in {"", None} else int(payload["source_index"]),
             reference_score_name=str(payload["reference_score_name"]),
             reference_score_value=float(payload["reference_score_value"]),
@@ -174,6 +183,10 @@ def build_frozen_matched_manifest(
     *,
     positive_cohort: str = "ambiguous_id",
     negative_cohort: str = "ood",
+    positive_source_dataset_name: str = "",
+    negative_source_dataset_name: str = "",
+    positive_source_role: str = "",
+    negative_source_role: str = "",
     reference_score_name: str = "softmax_entropy",
     num_bins: int = 10,
     test_size: float = 0.3,
@@ -184,11 +197,21 @@ def build_frozen_matched_manifest(
     if num_bins <= 0:
         raise ValueError("num_bins must be positive.")
 
-    samples_by_id = {
-        record.sample_id: record
-        for record in sample_analysis_records
-        if record.cohort_name in {positive_cohort, negative_cohort}
-    }
+    samples_by_id = {}
+    for record in sample_analysis_records:
+        if record.cohort_name not in {positive_cohort, negative_cohort}:
+            continue
+        if record.cohort_name == positive_cohort:
+            if positive_source_dataset_name and record.source_dataset_name != positive_source_dataset_name:
+                continue
+            if positive_source_role and record.source_role != positive_source_role:
+                continue
+        if record.cohort_name == negative_cohort:
+            if negative_source_dataset_name and record.source_dataset_name != negative_source_dataset_name:
+                continue
+            if negative_source_role and record.source_role != negative_source_role:
+                continue
+        samples_by_id[record.sample_id] = record
     references_by_id = {
         record.sample_id: record
         for record in reference_score_records
@@ -209,6 +232,10 @@ def build_frozen_matched_manifest(
     config_payload = {
         "positive_cohort": positive_cohort,
         "negative_cohort": negative_cohort,
+        "positive_source_dataset_name": positive_source_dataset_name,
+        "negative_source_dataset_name": negative_source_dataset_name,
+        "positive_source_role": positive_source_role,
+        "negative_source_role": negative_source_role,
         "reference_score_name": reference_score_name,
         "num_bins": num_bins,
         "test_size": test_size,
@@ -258,6 +285,9 @@ def build_frozen_matched_manifest(
                         sample_id=sample_record.sample_id,
                         cohort_name=sample_record.cohort_name,
                         source_dataset_name=sample_record.source_dataset_name,
+                        source_dataset_split=sample_record.source_dataset_split,
+                        source_role=sample_record.source_role,
+                        source_partition_name=sample_record.source_partition_name,
                         source_index=None,
                         reference_score_name=reference_record.reference_score_name,
                         reference_score_value=float(reference_record.reference_score_value),

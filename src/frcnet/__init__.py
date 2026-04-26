@@ -9,6 +9,8 @@ from frcnet.data import (
     collate_manifest_samples,
     load_plan_a_source_datasets,
     read_manifest_jsonl,
+    source_fingerprint_overlap,
+    source_fingerprints,
     validate_manifest_records,
     validate_batch_input,
     write_manifest_jsonl,
@@ -81,6 +83,8 @@ __all__ = [
     "load_plan_a_source_datasets",
     "move_batch_to_device",
     "read_manifest_jsonl",
+    "source_fingerprint_overlap",
+    "source_fingerprints",
     "read_matched_manifest",
     "read_proposition_view_records",
     "read_reference_score_records",
@@ -105,4 +109,4 @@ __all__ = [
     "write_top1_proposition_records",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

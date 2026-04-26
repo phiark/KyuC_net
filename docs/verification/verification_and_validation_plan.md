@@ -62,6 +62,8 @@
 - `VER-INT-016`: 主 matched benchmark 与 aggregate 主图不会再包含 proposition diagnostic `tau`
 - `VER-INT-017`: hard-ID manifest recipe 参数来自协议配置, 不被实现层静默覆盖
 - `VER-INT-018`: formal matched benchmark 可使用 frozen matched manifest, 不依赖临时数量截断
+- `VER-INT-019`: manifest overlap audit 使用 `(source_dataset_name, source_dataset_split, source_sample_index)` 验证 validation/final 零交叉
+- `VER-INT-020`: V0.5 final report 为 seen SVHN OOD、unseen CIFAR-100 OOD 和 all OOD 分别生成 frozen matched benchmark
 
 ### 2.4 Scientific Validation
 
@@ -72,6 +74,7 @@
 - `VER-SCI-003`: completion sensitivity 可观测
 - `VER-SCI-004`: easy ID accuracy 不出现不可接受退化
 - `VER-SCI-005`: v0.2 final test 达到 release gate 或明确标记 partial/negative evidence
+- `VER-SCI-006`: v0.5 final test 的 unseen OOD 结论仅来自 CIFAR-100 final-only slice
 
 ## 3. 需求到验证映射
 

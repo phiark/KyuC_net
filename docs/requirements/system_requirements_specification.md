@@ -94,6 +94,10 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-FN-036`: 系统必须区分 label-free `top1_view` 与 label-aware target/candidate proposition views
 - `REQ-FN-037`: formal matched benchmark 必须支持 frozen matched manifest, 并记录 reference score 与 manifest hash
 - `REQ-FN-038`: 主 benchmark feature whitelist 不得包含 label-aware proposition fields
+- `REQ-FN-039`: manifest、batch、analysis 与 matched-manifest records 必须携带 source split、source role 与 source partition provenance
+- `REQ-FN-040`: V0.5 validation 与 final-test manifests 必须按底层 source fingerprint 保持零交叉
+- `REQ-FN-041`: 系统必须支持 final-only unseen OOD source, V0.5 默认使用 CIFAR-100 test
+- `REQ-FN-042`: frozen matched benchmark 必须能按 `source_role` / `source_dataset_name` 输出 seen OOD、unseen OOD 与 all OOD slices
 
 ## 4. 非功能需求
 
@@ -112,6 +116,7 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-SCI-005`: `tau` 的规范口径必须来自 proposition layer, 不得继续把 top-1 surrogate 当作唯一规范 `tau`
 - `REQ-SCI-006`: `plan_a_next_v0_2` final test 的 pair AUROC 应达到 `0.95`, 并比 best one-feature scalar 高至少 `0.02`
 - `REQ-SCI-007`: `plan_a_next_v0_2` final test 应达到 easy top-1 `0.60`, hard top-1 `0.45`, ambiguous hit `0.75`; 未达标时必须标记 partial/negative evidence
+- `REQ-SCI-008`: `plan_a_next_v0_5` 不得从 SVHN-only evidence 声称 unseen OOD 泛化; unseen OOD 结论必须来自 final-only CIFAR-100 slice
 
 ## 6. 关键开放问题
 

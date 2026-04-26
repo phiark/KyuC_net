@@ -19,6 +19,11 @@ class BatchInput:
     cohort_name: list[str]
     source_dataset_name: list[str]
     source_class_label: list[int | None] | None = None
+    source_dataset_split: list[str] | None = None
+    source_role: list[str] | None = None
+    source_partition_name: list[str] | None = None
+    source_sample_indices: list[tuple[int, ...]] | None = None
+    augmentation_recipe: list[str] | None = None
     candidate_class_mask: torch.Tensor | None = None
 
     @property
@@ -50,6 +55,15 @@ def validate_batch_input(batch_input: BatchInput, num_classes: int | None = None
 
     if batch_input.source_class_label is not None and len(batch_input.source_class_label) != batch_size:
         raise ValueError("source_class_label must contain one entry per batch item when provided.")
+    for optional_field_name, optional_field_value in (
+        ("source_dataset_split", batch_input.source_dataset_split),
+        ("source_role", batch_input.source_role),
+        ("source_partition_name", batch_input.source_partition_name),
+        ("source_sample_indices", batch_input.source_sample_indices),
+        ("augmentation_recipe", batch_input.augmentation_recipe),
+    ):
+        if optional_field_value is not None and len(optional_field_value) != batch_size:
+            raise ValueError(f"{optional_field_name} must contain one entry per batch item when provided.")
 
     ambiguous_indices = [index for index, cohort in enumerate(batch_input.cohort_name) if cohort == "ambiguous_id"]
     id_indices = [index for index, cohort in enumerate(batch_input.cohort_name) if cohort in {"easy_id", "hard_id"}]

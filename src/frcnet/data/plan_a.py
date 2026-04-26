@@ -39,6 +39,11 @@ class ManifestSample:
     split_name: str
     cohort_name: str
     source_dataset_name: str
+    source_dataset_split: str
+    source_role: str
+    source_partition_name: str
+    source_sample_indices: tuple[int, ...]
+    augmentation_recipe: str
     source_class_label: int | None
     candidate_class_mask: torch.Tensor | None
 
@@ -67,11 +72,27 @@ def _load_cifar10_dataset(dataset_config: Mapping[str, Any]) -> object:
         )
 
 
+def _load_cifar100_dataset(dataset_config: Mapping[str, Any]) -> object:
+    return datasets.CIFAR100(
+        root=dataset_config["root"],
+        train=bool(dataset_config.get("train", False)),
+        download=bool(dataset_config.get("download", False)),
+    )
+
+
+def _dataset_split_name(dataset_name: str, dataset_config: Mapping[str, Any]) -> str:
+    if dataset_name in {"cifar10", "cifar100"}:
+        return "train" if bool(dataset_config.get("train", False)) else "test"
+    if dataset_name == "svhn":
+        return str(dataset_config.get("split", "test"))
+    return str(dataset_config.get("split", ""))
+
+
 def load_plan_a_source_datasets(protocol_config: Mapping[str, Any]) -> dict[str, object]:
     datasets_config = protocol_config["datasets"]
     cifar_config = datasets_config["cifar10"]
     svhn_config = datasets_config["svhn"]
-    return {
+    loaded_datasets: dict[str, object] = {
         "cifar10": _load_cifar10_dataset(cifar_config),
         "svhn": datasets.SVHN(
             root=svhn_config["root"],
@@ -79,6 +100,9 @@ def load_plan_a_source_datasets(protocol_config: Mapping[str, Any]) -> dict[str,
             download=bool(svhn_config.get("download", False)),
         ),
     }
+    if "cifar100" in datasets_config:
+        loaded_datasets["cifar100"] = _load_cifar100_dataset(datasets_config["cifar100"])
+    return loaded_datasets
 
 
 def _labels_to_class_index(labels: Iterable[int]) -> dict[int, list[int]]:
@@ -86,6 +110,51 @@ def _labels_to_class_index(labels: Iterable[int]) -> dict[int, list[int]]:
     for sample_index, label in enumerate(labels):
         class_to_indices[int(label)].append(sample_index)
     return class_to_indices
+
+
+def _dataset_config(protocol_config: Mapping[str, Any], dataset_name: str) -> Mapping[str, Any]:
+    return protocol_config.get("datasets", {}).get(dataset_name, {})
+
+
+def _source_partition_config(protocol_config: Mapping[str, Any], dataset_name: str) -> Mapping[str, Any]:
+    return protocol_config.get("source_partitions", {}).get(dataset_name, {})
+
+
+def _source_partition_name(protocol_config: Mapping[str, Any], dataset_name: str) -> str:
+    partition_config = _source_partition_config(protocol_config, dataset_name)
+    return str(partition_config.get("name", "all"))
+
+
+def _source_role(protocol_config: Mapping[str, Any], dataset_name: str, default_role: str) -> str:
+    source_roles = protocol_config.get("source_roles", {})
+    return str(source_roles.get(dataset_name, default_role))
+
+
+def _partition_global_indices(indices: Iterable[int], partition_config: Mapping[str, Any]) -> list[int]:
+    selected = list(indices)
+    start = int(partition_config.get("index_start", partition_config.get("global_index_start", 0)))
+    stop_value = partition_config.get("index_stop", partition_config.get("global_index_stop"))
+    stop = None if stop_value is None else int(stop_value)
+    return selected[start:stop]
+
+
+def _partition_class_indices(
+    class_to_indices: Mapping[int, list[int]],
+    partition_config: Mapping[str, Any],
+) -> dict[int, list[int]]:
+    class_start = int(partition_config.get("class_index_start", 0))
+    class_stop_value = partition_config.get("class_index_stop")
+    class_stop = None if class_stop_value is None else int(class_stop_value)
+    global_start = int(partition_config.get("index_start", partition_config.get("global_index_start", 0)))
+    global_stop_value = partition_config.get("index_stop", partition_config.get("global_index_stop"))
+    global_stop = None if global_stop_value is None else int(global_stop_value)
+    partitioned: dict[int, list[int]] = {}
+    for class_label, label_indices in class_to_indices.items():
+        if "class_index_start" in partition_config or "class_index_stop" in partition_config:
+            partitioned[class_label] = list(label_indices)[class_start:class_stop]
+        else:
+            partitioned[class_label] = list(label_indices)[global_start:global_stop]
+    return partitioned
 
 
 def _pop_indices(index_pool: list[int], count: int) -> list[int]:
@@ -170,11 +239,21 @@ def build_plan_a_manifest(
 
     cifar_labels = _extract_labels(source_datasets["cifar10"])
     svhn_labels = _extract_labels(source_datasets["svhn"])
+    cifar_split = _dataset_split_name("cifar10", _dataset_config(protocol_config, "cifar10"))
+    svhn_split = _dataset_split_name("svhn", _dataset_config(protocol_config, "svhn"))
+    cifar_partition_name = _source_partition_name(protocol_config, "cifar10")
+    svhn_partition_name = _source_partition_name(protocol_config, "svhn")
 
-    cifar_indices = _labels_to_class_index(cifar_labels)
+    cifar_indices = _partition_class_indices(
+        _labels_to_class_index(cifar_labels),
+        _source_partition_config(protocol_config, "cifar10"),
+    )
     for label_indices in cifar_indices.values():
         rng.shuffle(label_indices)
-    svhn_indices = list(range(len(svhn_labels)))
+    svhn_indices = _partition_global_indices(
+        range(len(svhn_labels)),
+        _source_partition_config(protocol_config, "svhn"),
+    )
     rng.shuffle(svhn_indices)
 
     manifest_records: list[SampleManifestRecord] = []
@@ -202,6 +281,9 @@ def build_plan_a_manifest(
                     augmentation_recipe="identity",
                     augmentation_parameters={},
                     source_class_labels=(class_label,),
+                    source_dataset_split=cifar_split,
+                    source_role=_source_role(protocol_config, "cifar10", "in_domain"),
+                    source_partition_name=cifar_partition_name,
                 )
             )
 
@@ -221,6 +303,9 @@ def build_plan_a_manifest(
                     augmentation_recipe=recipe,
                     augmentation_parameters=parameters,
                     source_class_labels=(class_label,),
+                    source_dataset_split=cifar_split,
+                    source_role=_source_role(protocol_config, "cifar10", "in_domain"),
+                    source_partition_name=cifar_partition_name,
                 )
             )
 
@@ -261,29 +346,67 @@ def build_plan_a_manifest(
                         augmentation_recipe=recipe_name,
                         augmentation_parameters=augmentation_parameters,
                         source_class_labels=class_pair,
+                        source_dataset_split=cifar_split,
+                        source_role=_source_role(protocol_config, "cifar10", "in_domain"),
+                        source_partition_name=cifar_partition_name,
                     )
                 )
                 ambiguous_cursor += 1
 
-    ood_indices = _pop_indices(svhn_indices, ood_count)
-    for index in ood_indices:
-        manifest_records.append(
-            SampleManifestRecord(
-                protocol_id=protocol_id,
-                sample_id=f"{split_name}_ood_svhn_{index:05d}",
-                split_name=split_name,
-                cohort_name="ood",
-                source_dataset_name="svhn",
-                source_sample_indices=(index,),
-                source_class_label=int(svhn_labels[index]),
-                class_label=-1,
-                augmentation_recipe="identity",
-                augmentation_parameters={},
-                source_class_labels=(int(svhn_labels[index]),),
-            )
+    ood_sources = protocol_config.get("ood_sources")
+    if ood_sources is None:
+        ood_sources = [
+            {
+                "dataset_name": "svhn",
+                "count": ood_count,
+                "source_role": _source_role(protocol_config, "svhn", "seen_source_ood"),
+            }
+        ]
+    dataset_index_pools: dict[str, list[int]] = {"svhn": svhn_indices}
+    dataset_labels: dict[str, list[int]] = {"svhn": svhn_labels}
+    dataset_splits: dict[str, str] = {"svhn": svhn_split}
+    dataset_partitions: dict[str, str] = {"svhn": svhn_partition_name}
+    if "cifar100" in source_datasets:
+        cifar100_labels = _extract_labels(source_datasets["cifar100"])
+        cifar100_indices = _partition_global_indices(
+            range(len(cifar100_labels)),
+            _source_partition_config(protocol_config, "cifar100"),
         )
+        rng.shuffle(cifar100_indices)
+        dataset_index_pools["cifar100"] = cifar100_indices
+        dataset_labels["cifar100"] = cifar100_labels
+        dataset_splits["cifar100"] = _dataset_split_name("cifar100", _dataset_config(protocol_config, "cifar100"))
+        dataset_partitions["cifar100"] = _source_partition_name(protocol_config, "cifar100")
 
-    unknown_indices = _pop_indices(svhn_indices, unknown_count)
+    for ood_source in ood_sources:
+        dataset_name = str(ood_source.get("dataset_name", ood_source.get("name", "svhn")))
+        if dataset_name not in dataset_index_pools:
+            raise ValueError(f"Configured OOD source `{dataset_name}` is not loaded in source_datasets.")
+        source_count = int(ood_source.get("count", ood_count))
+        source_role = str(ood_source.get("source_role", _source_role(protocol_config, dataset_name, "ood_source")))
+        source_indices = _pop_indices(dataset_index_pools[dataset_name], source_count)
+        labels = dataset_labels[dataset_name]
+        for index in source_indices:
+            manifest_records.append(
+                SampleManifestRecord(
+                    protocol_id=protocol_id,
+                    sample_id=f"{split_name}_ood_{dataset_name}_{index:05d}",
+                    split_name=split_name,
+                    cohort_name="ood",
+                    source_dataset_name=dataset_name,
+                    source_sample_indices=(index,),
+                    source_class_label=int(labels[index]),
+                    class_label=-1,
+                    augmentation_recipe="identity",
+                    augmentation_parameters={},
+                    source_class_labels=(int(labels[index]),),
+                    source_dataset_split=dataset_splits[dataset_name],
+                    source_role=source_role,
+                    source_partition_name=str(ood_source.get("source_partition_name", dataset_partitions[dataset_name])),
+                )
+            )
+
+    unknown_indices = _pop_indices(dataset_index_pools["svhn"], unknown_count)
     for index in unknown_indices:
         manifest_records.append(
             SampleManifestRecord(
@@ -298,6 +421,9 @@ def build_plan_a_manifest(
                 augmentation_recipe="identity",
                 augmentation_parameters={},
                 source_class_labels=(int(svhn_labels[index]),),
+                source_dataset_split=svhn_split,
+                source_role=_source_role(protocol_config, "svhn", "seen_unknown_source"),
+                source_partition_name=svhn_partition_name,
             )
         )
 
@@ -383,6 +509,11 @@ class ManifestBackedVisionDataset(Dataset[ManifestSample]):
             split_name=record.split_name,
             cohort_name=record.cohort_name,
             source_dataset_name=record.source_dataset_name,
+            source_dataset_split=record.source_dataset_split,
+            source_role=record.source_role,
+            source_partition_name=record.source_partition_name,
+            source_sample_indices=record.source_sample_indices,
+            augmentation_recipe=record.augmentation_recipe,
             source_class_label=record.source_class_label,
             candidate_class_mask=candidate_class_mask,
         )
@@ -410,6 +541,11 @@ def collate_manifest_samples(samples: list[ManifestSample]) -> BatchInput:
         cohort_name=[sample.cohort_name for sample in samples],
         source_dataset_name=[sample.source_dataset_name for sample in samples],
         source_class_label=[sample.source_class_label for sample in samples],
+        source_dataset_split=[sample.source_dataset_split for sample in samples],
+        source_role=[sample.source_role for sample in samples],
+        source_partition_name=[sample.source_partition_name for sample in samples],
+        source_sample_indices=[sample.source_sample_indices for sample in samples],
+        augmentation_recipe=[sample.augmentation_recipe for sample in samples],
         candidate_class_mask=candidate_class_mask,
     )
 
@@ -417,12 +553,18 @@ def collate_manifest_samples(samples: list[ManifestSample]) -> BatchInput:
 def summarize_manifest(records: Iterable[SampleManifestRecord]) -> dict[str, Any]:
     cohort_counts: dict[str, int] = defaultdict(int)
     split_counts: dict[str, int] = defaultdict(int)
+    source_role_counts: dict[str, int] = defaultdict(int)
+    source_dataset_counts: dict[str, int] = defaultdict(int)
     for record in records:
         cohort_counts[record.cohort_name] += 1
         split_counts[record.split_name] += 1
+        source_role_counts[record.source_role] += 1
+        source_dataset_counts[record.source_dataset_name] += 1
     return {
         "cohort_counts": dict(sorted(cohort_counts.items())),
         "split_counts": dict(sorted(split_counts.items())),
+        "source_dataset_counts": dict(sorted(source_dataset_counts.items())),
+        "source_role_counts": dict(sorted(source_role_counts.items())),
     }
 
 

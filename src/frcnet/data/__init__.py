@@ -4,6 +4,8 @@ from frcnet.data.contracts import ALLOWED_COHORT_NAMES, BatchInput, validate_bat
 from frcnet.data.manifest import (
     SampleManifestRecord,
     read_manifest_jsonl,
+    source_fingerprint_overlap,
+    source_fingerprints,
     validate_manifest_records,
     write_manifest_jsonl,
 )
@@ -27,6 +29,8 @@ __all__ = [
     "collate_manifest_samples",
     "load_plan_a_source_datasets",
     "read_manifest_jsonl",
+    "source_fingerprint_overlap",
+    "source_fingerprints",
     "summarize_manifest",
     "validate_batch_input",
     "validate_manifest_records",

@@ -10,6 +10,7 @@ from frcnet.analysis.artifacts import (
     write_geometry_scatter,
     write_proposition_diagnostic_table,
     write_scalar_roc_curve,
+    write_source_slice_summary_table,
     write_tau_cohort_boxplot,
 )
 from frcnet.analysis.reporting import write_experiment_record
@@ -25,5 +26,6 @@ __all__ = [
     "write_geometry_scatter",
     "write_proposition_diagnostic_table",
     "write_scalar_roc_curve",
+    "write_source_slice_summary_table",
     "write_tau_cohort_boxplot",
 ]

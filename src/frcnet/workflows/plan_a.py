@@ -27,6 +27,7 @@ from frcnet.analysis import (
     write_geometry_scatter,
     write_proposition_diagnostic_table,
     write_scalar_roc_curve,
+    write_source_slice_summary_table,
     write_tau_cohort_boxplot,
 )
 from frcnet.data import (
@@ -230,6 +231,7 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
             "emit_proposition_diagnostics": True,
             "matched_manifest_path": "",
             "require_matched_manifest": False,
+            "benchmark_slices": (),
             "test_size": 0.3,
             "random_state": 7,
         }
@@ -263,6 +265,7 @@ def _resolve_eval_config(eval_config_path: str | Path | None) -> dict[str, str |
         "emit_proposition_diagnostics": bool(eval_config.get("emit_proposition_diagnostics", True)),
         "matched_manifest_path": str(eval_config.get("matched_manifest_path", "")),
         "require_matched_manifest": bool(eval_config.get("require_matched_manifest", False)),
+        "benchmark_slices": tuple(dict(value) for value in eval_config.get("benchmark_slices", ())),
         "test_size": float(eval_config.get("test_size", 0.3)),
         "random_state": int(eval_config.get("random_state", 7)),
     }
@@ -280,6 +283,29 @@ def _read_optional_matched_manifest(resolved_eval_config: Mapping[str, Any]):
             raise FileNotFoundError(f"matched_manifest_path does not exist: {path}")
         return None
     return read_matched_manifest(path)
+
+
+def _benchmark_slice_config(
+    resolved_eval_config: Mapping[str, Any],
+    benchmark_slice: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = dict(resolved_eval_config)
+    for key in (
+        "positive_cohort",
+        "negative_cohort",
+        "matched_manifest_path",
+        "require_matched_manifest",
+        "test_size",
+        "random_state",
+    ):
+        if key in benchmark_slice:
+            merged[key] = benchmark_slice[key]
+    merged["benchmark_name"] = str(benchmark_slice.get("benchmark_name", "matched_ambiguous_vs_ood"))
+    return merged
+
+
+def _safe_artifact_stem(value: str) -> str:
+    return "".join(character if character.isalnum() or character in {"_", "-"} else "_" for character in value)
 
 
 def _normalize_training_phases(train_config: Mapping[str, Any]) -> list[TrainPhase]:
@@ -1933,6 +1959,10 @@ def generate_plan_a_artifact_bundle(
         sample_analysis_records,
         output_root / analysis_config.get("cohort_summary_table_name", "cohort_summary_table.csv"),
     )
+    source_slice_summary_path = write_source_slice_summary_table(
+        sample_analysis_records,
+        output_root / analysis_config.get("source_slice_summary_table_name", "source_slice_summary_table.csv"),
+    )
     matched_manifest_records = _read_optional_matched_manifest(resolved_eval_config)
     matched_summary = summarize_matched_ambiguous_vs_ood(
         sample_analysis_records,
@@ -1960,6 +1990,40 @@ def generate_plan_a_artifact_bundle(
         random_state=int(resolved_eval_config["random_state"]),
         matched_manifest_records=matched_manifest_records,
     )
+    benchmark_artifact_paths: dict[str, str] = {}
+    for benchmark_slice in tuple(resolved_eval_config.get("benchmark_slices", ())):
+        slice_config = _benchmark_slice_config(resolved_eval_config, benchmark_slice)
+        benchmark_name = str(slice_config["benchmark_name"])
+        artifact_stem = _safe_artifact_stem(benchmark_name)
+        slice_manifest_records = _read_optional_matched_manifest(slice_config)
+        slice_summary = summarize_matched_ambiguous_vs_ood(
+            sample_analysis_records,
+            positive_cohort=str(slice_config["positive_cohort"]),
+            negative_cohort=str(slice_config["negative_cohort"]),
+            primary_pair=str(resolved_eval_config["primary_pair"]),
+            weighted_pair=str(resolved_eval_config["secondary_pair"]),
+            primary_scalar=str(resolved_eval_config["primary_scalar"]),
+            completion_scan_scalars=tuple(resolved_eval_config["completion_scan_scalars"]),
+            test_size=float(slice_config["test_size"]),
+            random_state=int(slice_config["random_state"]),
+            matched_manifest_records=slice_manifest_records,
+        )
+        slice_matched_path = write_matched_benchmark_summary(
+            slice_summary,
+            output_root / f"{artifact_stem}_matched_table.csv",
+        )
+        slice_completion_path = write_completion_scan_table(
+            sample_analysis_records,
+            output_root / f"{artifact_stem}_completion_scan_table.csv",
+            positive_cohort=str(slice_config["positive_cohort"]),
+            negative_cohort=str(slice_config["negative_cohort"]),
+            scalar_names=tuple(resolved_eval_config["completion_scan_scalars"]),
+            test_size=float(slice_config["test_size"]),
+            random_state=int(slice_config["random_state"]),
+            matched_manifest_records=slice_manifest_records,
+        )
+        benchmark_artifact_paths[f"{artifact_stem}_matched_table"] = str(slice_matched_path)
+        benchmark_artifact_paths[f"{artifact_stem}_completion_scan_table"] = str(slice_completion_path)
     proposition_diagnostic_table_path: Path | None = None
     proposition_tau_roc_curve_path: Path | None = None
     if bool(resolved_eval_config["emit_proposition_diagnostics"]):
@@ -2008,8 +2072,10 @@ def generate_plan_a_artifact_bundle(
         "cohort_counts": str(cohort_counts_path),
         "tau_cohort_boxplot": str(tau_boxplot_path),
         "cohort_summary_table": str(summary_path),
+        "source_slice_summary_table": str(source_slice_summary_path),
         "matched_ambiguous_vs_ood_table": str(matched_path),
         "completion_scan_table": str(completion_scan_path),
+        **benchmark_artifact_paths,
     }
     if proposition_diagnostic_table_path is not None:
         artifact_paths["proposition_diagnostic_table"] = str(proposition_diagnostic_table_path)

@@ -12,3 +12,4 @@ Current records:
 - `2026-04-25_review_literature_project_alignment.md`
 - `2026-04-25_review_v0_4_strict_freeze_scope_control.md`
 - `2026-04-25_review_v0_4_strict_freeze_local_proof.md`
+- `2026-04-26_review_v0_5_evidence_repair_scope.md`

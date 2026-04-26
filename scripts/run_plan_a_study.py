@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(
         "--download",
+        "--allow-download",
         action="store_true",
         help="Allow torchvision to download missing CIFAR10/SVHN data before the study starts.",
     )

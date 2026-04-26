@@ -46,6 +46,11 @@ class SampleAnalysisRecord:
     top1_completion_beta_0_5: float
     top1_completion_beta_0_75: float
     candidate_class_indices: tuple[int, ...] = ()
+    source_dataset_split: str = ""
+    source_role: str = ""
+    source_partition_name: str = ""
+    source_sample_indices: tuple[int, ...] = ()
+    augmentation_recipe: str = ""
 
     @property
     def content_entropy(self) -> float:
@@ -108,6 +113,11 @@ class SampleAnalysisRecord:
             "split_name": self.split_name,
             "cohort_name": self.cohort_name,
             "source_dataset_name": self.source_dataset_name,
+            "source_dataset_split": self.source_dataset_split,
+            "source_role": self.source_role,
+            "source_partition_name": self.source_partition_name,
+            "source_sample_indices_json": json.dumps(list(self.source_sample_indices)),
+            "augmentation_recipe": self.augmentation_recipe,
             "source_class_label": "" if self.source_class_label is None else self.source_class_label,
             "class_label": self.class_label,
             "predicted_class_index": self.predicted_class_index,
@@ -452,6 +462,11 @@ def read_sample_analysis_records(input_path: str | Path) -> list[SampleAnalysisR
                     top1_completion_beta_0_5=top1_completion_beta_0_5,
                     top1_completion_beta_0_75=top1_completion_beta_0_75,
                     candidate_class_indices=tuple(json.loads(row.get("candidate_class_indices_json", "[]"))),
+                    source_dataset_split=str(row.get("source_dataset_split", "")),
+                    source_role=str(row.get("source_role", "")),
+                    source_partition_name=str(row.get("source_partition_name", "")),
+                    source_sample_indices=tuple(json.loads(row.get("source_sample_indices_json", "[]"))),
+                    augmentation_recipe=str(row.get("augmentation_recipe", "")),
                 )
             )
     return records

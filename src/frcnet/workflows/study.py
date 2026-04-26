@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import csv
 import json
+import math
 from pathlib import Path
 from statistics import mean, pstdev
+import subprocess
+import sys
 from typing import Any, Callable, Mapping, Sequence
 
 import matplotlib.pyplot as plt
@@ -35,6 +38,9 @@ class StudyRunMetric:
     hard_id_top1_accuracy: float
     ambiguous_candidate_hit_rate: float
     run_output_dir: str
+    seen_ood_pair_auroc: float = math.nan
+    unseen_ood_pair_auroc: float = math.nan
+    all_ood_pair_auroc: float = math.nan
 
     def to_csv_row(self) -> dict[str, str | int | float]:
         return {
@@ -48,6 +54,9 @@ class StudyRunMetric:
             "easy_id_top1_accuracy": self.easy_id_top1_accuracy,
             "hard_id_top1_accuracy": self.hard_id_top1_accuracy,
             "ambiguous_candidate_hit_rate": self.ambiguous_candidate_hit_rate,
+            "seen_ood_pair_auroc": self.seen_ood_pair_auroc,
+            "unseen_ood_pair_auroc": self.unseen_ood_pair_auroc,
+            "all_ood_pair_auroc": self.all_ood_pair_auroc,
             "run_output_dir": self.run_output_dir,
         }
 
@@ -66,6 +75,9 @@ class CheckpointPolicyMetric:
     hard_id_top1_accuracy: float
     ambiguous_candidate_hit_rate: float
     run_output_dir: str
+    seen_ood_pair_auroc: float = math.nan
+    unseen_ood_pair_auroc: float = math.nan
+    all_ood_pair_auroc: float = math.nan
 
     def to_csv_row(self) -> dict[str, str | int | float]:
         return {
@@ -80,6 +92,9 @@ class CheckpointPolicyMetric:
             "easy_id_top1_accuracy": self.easy_id_top1_accuracy,
             "hard_id_top1_accuracy": self.hard_id_top1_accuracy,
             "ambiguous_candidate_hit_rate": self.ambiguous_candidate_hit_rate,
+            "seen_ood_pair_auroc": self.seen_ood_pair_auroc,
+            "unseen_ood_pair_auroc": self.unseen_ood_pair_auroc,
+            "all_ood_pair_auroc": self.all_ood_pair_auroc,
             "run_output_dir": self.run_output_dir,
         }
 
@@ -91,6 +106,9 @@ AGGREGATE_METRIC_NAMES = (
     "easy_id_top1_accuracy",
     "hard_id_top1_accuracy",
     "ambiguous_candidate_hit_rate",
+    "seen_ood_pair_auroc",
+    "unseen_ood_pair_auroc",
+    "all_ood_pair_auroc",
 )
 
 
@@ -99,6 +117,12 @@ def _write_yaml_section(output_path: str | Path, section_name: str, payload: Map
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(yaml.safe_dump({section_name: payload}, sort_keys=False), encoding="utf-8")
     return output
+
+
+def _run_repo_script(script_name: str, args: Sequence[str], progress_callback: Callable[[str], None] | None) -> None:
+    command = [sys.executable, f"scripts/{script_name}", *args]
+    _emit_progress(progress_callback, "[study] run " + " ".join(command))
+    subprocess.run(command, check=True)
 
 
 def _emit_progress(progress_callback: Callable[[str], None] | None, message: str) -> None:
@@ -273,6 +297,128 @@ def _checkpoint_path_for_policy(train_output: Mapping[str, Any], policy_name: st
     return ""
 
 
+def _prepare_run_strict_eval_config(
+    *,
+    run_id: str,
+    run_root: Path,
+    train_protocol_config: str | Path,
+    final_test_protocol_config: str | Path,
+    model_config: str | Path,
+    eval_config: str | Path,
+    reference_config: str | Path | None,
+    final_manifest_path: str | Path,
+    analysis_path: str | Path,
+    progress_callback: Callable[[str], None] | None,
+) -> Path:
+    eval_payload = _load_yaml_section(eval_config, "eval")
+    benchmark_slices = [dict(value) for value in eval_payload.get("benchmark_slices", [])]
+    strict_required = bool(eval_payload.get("require_matched_manifest", False)) or any(
+        bool(value.get("require_matched_manifest", False)) for value in benchmark_slices
+    )
+    if not strict_required:
+        return Path(eval_config)
+    if reference_config is None:
+        raise ValueError("study.reference_config is required when eval.require_matched_manifest=true.")
+
+    reference_training_root = run_root / "reference" / "training"
+    reference_checkpoint_path = reference_training_root / "checkpoints" / "checkpoint_best.pt"
+    if not reference_checkpoint_path.exists():
+        _run_repo_script(
+            "train_softmax_reference.py",
+            [
+                "--protocol-config",
+                str(train_protocol_config),
+                "--model-config",
+                str(model_config),
+                "--reference-config",
+                str(reference_config),
+                "--output-dir",
+                str(reference_training_root),
+                "--run-id",
+                f"{run_id}-softmax-reference",
+            ],
+            progress_callback,
+        )
+
+    reference_scores_root = run_root / "reference" / "final_test_scores"
+    reference_scores_path = reference_scores_root / "reference_score_records.jsonl"
+    if not reference_scores_path.exists():
+        _run_repo_script(
+            "run_softmax_reference_inference.py",
+            [
+                "--protocol-config",
+                str(final_test_protocol_config),
+                "--model-config",
+                str(model_config),
+                "--reference-config",
+                str(reference_config),
+                "--manifest-path",
+                str(final_manifest_path),
+                "--checkpoint-path",
+                str(reference_checkpoint_path),
+                "--output-dir",
+                str(reference_scores_root),
+                "--run-id",
+                f"{run_id}-softmax-reference-final-test",
+            ],
+            progress_callback,
+        )
+
+    matched_root = run_root / "shared" / "matched_manifest"
+    primary_manifest_path = matched_root / "ambiguous_vs_all_ood" / "frozen_matched_manifest.jsonl"
+    primary_diagnostics_path = matched_root / "ambiguous_vs_all_ood" / "bin_diagnostics.csv"
+    if not primary_manifest_path.exists():
+        _run_repo_script(
+            "build_frozen_matched_manifest.py",
+            [
+                "--analysis-path",
+                str(analysis_path),
+                "--reference-scores-path",
+                str(reference_scores_path),
+                "--eval-config",
+                str(eval_config),
+                "--output-path",
+                str(primary_manifest_path),
+                "--diagnostics-path",
+                str(primary_diagnostics_path),
+            ],
+            progress_callback,
+        )
+    eval_payload["matched_manifest_path"] = str(primary_manifest_path)
+
+    for benchmark_slice in benchmark_slices:
+        benchmark_name = str(benchmark_slice["benchmark_name"])
+        benchmark_stem = "".join(
+            character if character.isalnum() or character in {"_", "-"} else "_" for character in benchmark_name
+        )
+        slice_manifest_path = matched_root / benchmark_stem / "frozen_matched_manifest.jsonl"
+        slice_diagnostics_path = matched_root / benchmark_stem / "bin_diagnostics.csv"
+        if not slice_manifest_path.exists():
+            _run_repo_script(
+                "build_frozen_matched_manifest.py",
+                [
+                    "--analysis-path",
+                    str(analysis_path),
+                    "--reference-scores-path",
+                    str(reference_scores_path),
+                    "--eval-config",
+                    str(eval_config),
+                    "--benchmark-name",
+                    benchmark_name,
+                    "--output-path",
+                    str(slice_manifest_path),
+                    "--diagnostics-path",
+                    str(slice_diagnostics_path),
+                ],
+                progress_callback,
+            )
+        benchmark_slice["matched_manifest_path"] = str(slice_manifest_path)
+    eval_payload["benchmark_slices"] = benchmark_slices
+
+    generated_eval_config_path = run_root / "shared" / "generated_configs" / "eval_strict_frozen.yaml"
+    return _write_yaml_section(generated_eval_config_path, "eval", eval_payload)
+
+
 def _proposition_accuracy(proposition_path: str | Path, cohort_name: str) -> float:
     proposition_records = read_top1_proposition_records(proposition_path)
     cohort_records = [record for record in proposition_records if record.cohort_name == cohort_name]
@@ -280,6 +426,16 @@ def _proposition_accuracy(proposition_path: str | Path, cohort_name: str) -> flo
         return 0.0
     correct_count = sum(int(record.is_top1_correct) for record in cohort_records)
     return correct_count / len(cohort_records)
+
+
+def _optional_pair_auroc(report_output: Mapping[str, Any], artifact_key: str) -> float:
+    artifact_path = report_output.get(artifact_key, "")
+    if not artifact_path:
+        return math.nan
+    path = Path(str(artifact_path))
+    if not path.exists():
+        return math.nan
+    return float(_single_csv_row(path)["pair_auroc"])
 
 
 def _collect_run_metric(study_id: str, seed: int, run_output: Mapping[str, Any]) -> StudyRunMetric:
@@ -297,6 +453,12 @@ def _collect_run_metric(study_id: str, seed: int, run_output: Mapping[str, Any])
         hard_id_top1_accuracy=_proposition_accuracy(proposition_path, "hard_id"),
         ambiguous_candidate_hit_rate=_proposition_accuracy(proposition_path, "ambiguous_id"),
         run_output_dir=str(run_output["output_dir"]),
+        seen_ood_pair_auroc=_optional_pair_auroc(run_output["report"], "ambiguous_vs_seen_ood_svhn_matched_table"),
+        unseen_ood_pair_auroc=_optional_pair_auroc(
+            run_output["report"],
+            "ambiguous_vs_unseen_ood_cifar100_matched_table",
+        ),
+        all_ood_pair_auroc=_optional_pair_auroc(run_output["report"], "ambiguous_vs_all_ood_matched_table"),
     )
 
 
@@ -326,6 +488,12 @@ def _collect_policy_metric(
         hard_id_top1_accuracy=_proposition_accuracy(proposition_path, "hard_id"),
         ambiguous_candidate_hit_rate=_proposition_accuracy(proposition_path, "ambiguous_id"),
         run_output_dir=str(run_root),
+        seen_ood_pair_auroc=_optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_svhn_matched_table"),
+        unseen_ood_pair_auroc=_optional_pair_auroc(
+            report_output,
+            "ambiguous_vs_unseen_ood_cifar100_matched_table",
+        ),
+        all_ood_pair_auroc=_optional_pair_auroc(report_output, "ambiguous_vs_all_ood_matched_table"),
     )
 
 
@@ -350,7 +518,14 @@ def _write_metric_summary(metrics: Sequence[StudyRunMetric], output_path: str | 
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for metric_name in AGGREGATE_METRIC_NAMES:
-            values = [float(getattr(metric, metric_name)) for metric in metrics]
+            values = [
+                float(getattr(metric, metric_name))
+                for metric in metrics
+                if not math.isnan(float(getattr(metric, metric_name)))
+            ]
+            if not values:
+                writer.writerow({"metric_name": metric_name, "mean": "", "std": "", "min": "", "max": ""})
+                continue
             writer.writerow(
                 {
                     "metric_name": metric_name,
@@ -387,7 +562,16 @@ def _write_checkpoint_policy_summary(metrics: Sequence[CheckpointPolicyMetric], 
         for policy_name in policy_names:
             policy_metrics = [metric for metric in metrics if metric.policy_name == policy_name]
             for metric_name in AGGREGATE_METRIC_NAMES:
-                values = [float(getattr(metric, metric_name)) for metric in policy_metrics]
+                values = [
+                    float(getattr(metric, metric_name))
+                    for metric in policy_metrics
+                    if not math.isnan(float(getattr(metric, metric_name)))
+                ]
+                if not values:
+                    writer.writerow(
+                        {"policy_name": policy_name, "metric_name": metric_name, "mean": "", "std": "", "min": "", "max": ""}
+                    )
+                    continue
                 writer.writerow(
                     {
                         "policy_name": policy_name,
@@ -426,14 +610,17 @@ def _write_checkpoint_policy_gap_summary(
             minuend_metric = by_seed_policy[(seed, minuend_policy)]
             subtrahend_metric = by_seed_policy[(seed, subtrahend_policy)]
             for metric_name in AGGREGATE_METRIC_NAMES:
+                minuend_value = float(getattr(minuend_metric, metric_name))
+                subtrahend_value = float(getattr(subtrahend_metric, metric_name))
                 writer.writerow(
                     {
                         "seed": seed,
                         "metric_name": metric_name,
                         "minuend_policy": minuend_policy,
                         "subtrahend_policy": subtrahend_policy,
-                        "delta": float(getattr(minuend_metric, metric_name))
-                        - float(getattr(subtrahend_metric, metric_name)),
+                        "delta": ""
+                        if math.isnan(minuend_value) or math.isnan(subtrahend_value)
+                        else minuend_value - subtrahend_value,
                     }
                 )
     return output
@@ -653,11 +840,14 @@ def run_plan_a_study_bundle(
     _emit_progress(progress_callback, f"[study] study_id={study_id} output_dir={study_root}")
 
     train_protocol_config = study_config["train_protocol_config"]
-    analysis_protocol_config = study_config["analysis_protocol_config"]
+    analysis_protocol_config = study_config.get("analysis_protocol_config", study_config.get("final_test_protocol_config"))
+    validation_protocol_config = study_config.get("validation_protocol_config", analysis_protocol_config)
+    final_test_protocol_config = study_config.get("final_test_protocol_config", analysis_protocol_config)
     model_config = study_config["model_config"]
     train_config = study_config["train_config"]
     eval_config = study_config["eval_config"]
     analysis_config = study_config["analysis_config"]
+    reference_config = study_config.get("reference_config")
     seeds = [int(seed) for seed in study_config.get("seeds", (7, 17, 27))]
     model_family = str(study_config.get("model_family", "frcnet_explicit_unknown"))
     report_policy = dict(study_config.get("report_policy", {}))
@@ -667,19 +857,26 @@ def run_plan_a_study_bundle(
     ]
 
     prepare_plan_a_datasets(
-        [train_protocol_config, analysis_protocol_config],
+        list(dict.fromkeys([train_protocol_config, validation_protocol_config, final_test_protocol_config])),
         output_path=study_root / "data_preflight.json",
         download_override=download_override,
     )
     _emit_progress(progress_callback, f"[study] data_preflight={study_root / 'data_preflight.json'}")
 
-    shared_manifest_outputs = build_plan_a_manifest_bundle(
-        protocol_config_path=analysis_protocol_config,
-        output_dir=study_root / "shared" / "analysis_manifest",
+    validation_manifest_outputs = build_plan_a_manifest_bundle(
+        protocol_config_path=validation_protocol_config,
+        output_dir=study_root / "shared" / "validation_manifest",
         manifest_filename="plan_a_manifest.jsonl",
         summary_filename="plan_a_manifest_summary.json",
     )
-    _emit_progress(progress_callback, f"[study] shared_eval_manifest={shared_manifest_outputs['manifest_path']}")
+    _emit_progress(progress_callback, f"[study] shared_validation_manifest={validation_manifest_outputs['manifest_path']}")
+    final_manifest_outputs = build_plan_a_manifest_bundle(
+        protocol_config_path=final_test_protocol_config,
+        output_dir=study_root / "shared" / "final_test_manifest",
+        manifest_filename="plan_a_manifest.jsonl",
+        summary_filename="plan_a_manifest_summary.json",
+    )
+    _emit_progress(progress_callback, f"[study] shared_final_test_manifest={final_manifest_outputs['manifest_path']}")
 
     run_outputs: list[dict[str, Any]] = []
     for seed in seeds:
@@ -699,8 +896,8 @@ def run_plan_a_study_bundle(
                 train_config_path=generated_train_config_path,
                 output_dir=run_root / "training",
                 run_id=run_id,
-                validation_protocol_config_path=analysis_protocol_config,
-                validation_manifest_path=shared_manifest_outputs["manifest_path"],
+                validation_protocol_config_path=validation_protocol_config,
+                validation_manifest_path=validation_manifest_outputs["manifest_path"],
                 eval_config_path=eval_config,
                 progress_callback=progress_callback,
             )
@@ -719,9 +916,9 @@ def run_plan_a_study_bundle(
         inference_outputs = _load_existing_inference_outputs(run_root, run_id, "analysis")
         if inference_outputs is None:
             inference_outputs = export_plan_a_inference_bundle(
-                protocol_config_path=analysis_protocol_config,
+                protocol_config_path=final_test_protocol_config,
                 model_config_path=model_config,
-                manifest_path=shared_manifest_outputs["manifest_path"],
+                manifest_path=final_manifest_outputs["manifest_path"],
                 output_dir=run_root / "analysis",
                 run_id=run_id,
                 checkpoint_path=primary_checkpoint_path,
@@ -734,13 +931,26 @@ def run_plan_a_study_bundle(
                 f"[study] seed_resume_analysis run_id={run_id} analysis_csv={inference_outputs['analysis_path']}",
             )
 
+        run_eval_config = _prepare_run_strict_eval_config(
+            run_id=run_id,
+            run_root=run_root,
+            train_protocol_config=train_protocol_config,
+            final_test_protocol_config=final_test_protocol_config,
+            model_config=model_config,
+            eval_config=eval_config,
+            reference_config=reference_config,
+            final_manifest_path=final_manifest_outputs["manifest_path"],
+            analysis_path=inference_outputs["analysis_path"],
+            progress_callback=progress_callback,
+        )
+
         artifact_outputs = _load_existing_artifact_outputs(run_root, run_id, analysis_config, "report")
         if artifact_outputs is None:
             artifact_outputs = generate_plan_a_artifact_bundle(
                 analysis_path=inference_outputs["analysis_path"],
                 analysis_summary_path=inference_outputs["analysis_summary_path"],
-                protocol_config_path=analysis_protocol_config,
-                eval_config_path=eval_config,
+                protocol_config_path=final_test_protocol_config,
+                eval_config_path=run_eval_config,
                 analysis_config_path=analysis_config,
                 output_dir=run_root / "report",
             )
@@ -766,9 +976,9 @@ def run_plan_a_study_bundle(
             companion_inference_outputs = _load_existing_inference_outputs(run_root, run_id, analysis_subdir)
             if companion_inference_outputs is None:
                 companion_inference_outputs = export_plan_a_inference_bundle(
-                    protocol_config_path=analysis_protocol_config,
+                    protocol_config_path=final_test_protocol_config,
                     model_config_path=model_config,
-                    manifest_path=shared_manifest_outputs["manifest_path"],
+                    manifest_path=final_manifest_outputs["manifest_path"],
                     output_dir=run_root / analysis_subdir,
                     run_id=run_id,
                     checkpoint_path=companion_checkpoint_path,
@@ -785,8 +995,8 @@ def run_plan_a_study_bundle(
                 companion_artifact_outputs = generate_plan_a_artifact_bundle(
                     analysis_path=companion_inference_outputs["analysis_path"],
                     analysis_summary_path=companion_inference_outputs["analysis_summary_path"],
-                    protocol_config_path=analysis_protocol_config,
-                    eval_config_path=eval_config,
+                    protocol_config_path=final_test_protocol_config,
+                    eval_config_path=run_eval_config,
                     analysis_config_path=analysis_config,
                     output_dir=run_root / report_subdir,
                 )
@@ -800,7 +1010,8 @@ def run_plan_a_study_bundle(
                 "seed": seed,
                 "model_family": str(train_outputs.get("model_family", model_family)),
                 "output_dir": str(run_root),
-                "shared_eval_manifest_path": shared_manifest_outputs["manifest_path"],
+                "shared_validation_manifest_path": validation_manifest_outputs["manifest_path"],
+                "shared_eval_manifest_path": final_manifest_outputs["manifest_path"],
                 "primary_checkpoint_policy": primary_checkpoint_policy,
                 "companion_checkpoint_policies": companion_checkpoint_policies,
                 "train": train_outputs,
@@ -821,8 +1032,10 @@ def run_plan_a_study_bundle(
             "study_root": str(study_root),
             "study_config_path": str(study_config_path),
             "seeds": seeds,
-            "shared_eval_manifest_path": shared_manifest_outputs["manifest_path"],
-            "shared_eval_manifest_summary_path": shared_manifest_outputs["manifest_summary_path"],
+            "shared_validation_manifest_path": validation_manifest_outputs["manifest_path"],
+            "shared_validation_manifest_summary_path": validation_manifest_outputs["manifest_summary_path"],
+            "shared_eval_manifest_path": final_manifest_outputs["manifest_path"],
+            "shared_eval_manifest_summary_path": final_manifest_outputs["manifest_summary_path"],
             "primary_checkpoint_policy": primary_checkpoint_policy,
             "companion_checkpoint_policies": companion_checkpoint_policies,
             "runs": run_outputs,
@@ -842,6 +1055,7 @@ def run_plan_a_study_bundle(
         "study_id": study_id,
         "output_dir": str(study_root),
         "study_paths_path": str(study_paths_path),
-        "shared_eval_manifest_path": shared_manifest_outputs["manifest_path"],
+        "shared_validation_manifest_path": validation_manifest_outputs["manifest_path"],
+        "shared_eval_manifest_path": final_manifest_outputs["manifest_path"],
         **aggregate_outputs,
     }
