@@ -10,7 +10,7 @@ train:
         enabled_cohorts: [easy_id, unknown_supervision]
         lr_scale: 1.0
         dataloader:
-          source_balanced_sampling: true
+          source_balanced_sampling: false
         loss_overrides:
           unknown_content_entropy_weight: 0.5
           ood_supcon_weight: 0.05
