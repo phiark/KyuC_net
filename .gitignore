@@ -12,6 +12,11 @@ venv/
 *.egg-info/
 
 artifacts/checkpoints/
+artifacts/experiments/
 artifacts/logs/
 artifacts/reports/generated/
+artifacts/studies/
+records/experiments/
+.cache/
+tmp/pdfs/
 /data/
