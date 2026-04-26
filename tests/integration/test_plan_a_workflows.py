@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,12 @@ from frcnet.workflows.plan_a import (
     train_plan_a_model,
     write_plan_a_experiment_bundle,
 )
-from frcnet.workflows.study import aggregate_plan_a_study_bundle, run_plan_a_study_bundle
+from frcnet.workflows.study import (
+    CheckpointPolicyMetric,
+    StudyRunMetric,
+    aggregate_plan_a_study_bundle,
+    run_plan_a_study_bundle,
+)
 from tests.conftest import FakeLabelsDataset, FakeTargetsDataset, build_protocol_config
 
 
@@ -47,6 +53,20 @@ def _fake_source_datasets():
     }
 
 
+def _fake_multisource_datasets():
+    datasets = _fake_source_datasets()
+    datasets.update(
+        {
+            "dtd": FakeTargetsDataset([index % 47 for index in range(40)]),
+            "lsun_resize": FakeTargetsDataset([-1 for _ in range(40)]),
+            "gaussian_noise": FakeTargetsDataset([-1 for _ in range(40)]),
+            "tiny_imagenet": FakeTargetsDataset([index % 200 for index in range(40)]),
+            "cifar100": FakeTargetsDataset([index % 100 for index in range(40)]),
+        }
+    )
+    return datasets
+
+
 def _build_model_payload() -> dict:
     return {
         "name": "frcnet_resnet18_base",
@@ -55,6 +75,20 @@ def _build_model_payload() -> dict:
         "resolution_temperature": 1.0,
         "content_temperature": 1.0,
     }
+
+
+def _build_source_invariant_model_payload() -> dict:
+    payload = _build_model_payload()
+    payload.update(
+        {
+            "name": "frcnet_resnet18_source_invariant",
+            "source_adversary_enabled": True,
+            "num_source_domains": 7,
+            "grl_lambda": 1.0,
+            "source_head_hidden_dim": 32,
+        }
+    )
+    return payload
 
 
 def _build_train_payload(tmp_path: Path, *, epochs: int = 1) -> dict:
@@ -106,6 +140,71 @@ def _build_train_payload(tmp_path: Path, *, epochs: int = 1) -> dict:
                     },
                 },
             },
+        },
+    }
+
+
+def _build_source_invariant_protocol(split_name: str) -> dict:
+    return {
+        "protocol_id": f"plan_a_v0_6b_smoke_{split_name}",
+        "seed": 7,
+        "split_name": split_name,
+        "num_classes": 10,
+        "datasets": {
+            "cifar10": {"root": "data/cifar10", "train": True, "download": False},
+            "svhn": {"root": "data/svhn", "split": "train", "download": False},
+            "dtd": {"root": "data/dtd", "split": "train", "download": False},
+            "lsun_resize": {"root": "data/lsun_resize", "split": "all", "download": False},
+            "gaussian_noise": {"split": "train", "length": 40, "download": False},
+            "tiny_imagenet": {
+                "root": "data/tiny_imagenet/tiny-imagenet-200",
+                "split": "train",
+                "download": False,
+            },
+        },
+        "analysis": {
+            "easy_id_per_class": 1,
+            "hard_id_per_class": 1,
+            "ambiguous_per_pair": 1,
+            "ood_count": 0,
+            "unknown_supervision_count": 2,
+            "dataloader": {"batch_size": 20, "drop_last": True, "num_workers": 0},
+        },
+        "source_roles": {
+            "cifar10": "in_domain",
+            "svhn": "seen_unknown_source",
+            "dtd": "seen_unknown_source",
+            "lsun_resize": "seen_unknown_source",
+            "gaussian_noise": "seen_unknown_source",
+            "tiny_imagenet": "seen_unknown_source",
+        },
+        "source_domains": {
+            "cifar10": {"label": 0, "name": "cifar10"},
+            "svhn": {"label": 1, "name": "svhn"},
+            "dtd": {"label": 2, "name": "dtd"},
+            "lsun_resize": {"label": 3, "name": "lsun_resize"},
+            "gaussian_noise": {"label": 4, "name": "gaussian_noise"},
+            "tiny_imagenet": {"label": 5, "name": "tiny_imagenet"},
+            "cifar100": {"label": 6, "name": "cifar100"},
+        },
+        "unknown_sources": [
+            {"dataset_name": "svhn", "count": 2, "source_role": "seen_unknown_source"},
+            {"dataset_name": "dtd", "count": 2, "source_role": "seen_unknown_source"},
+            {"dataset_name": "lsun_resize", "count": 2, "source_role": "seen_unknown_source"},
+            {"dataset_name": "gaussian_noise", "count": 2, "source_role": "seen_unknown_source"},
+            {"dataset_name": "tiny_imagenet", "count": 2, "source_role": "seen_unknown_source"},
+        ],
+        "ambiguous": {
+            "recipes": ["mixup"],
+            "alpha_min": 0.35,
+            "alpha_max": 0.65,
+            "class_pairs": [[3, 5], [4, 7], [1, 9]],
+        },
+        "hard_id": {
+            "recipes": ["gaussian_blur", "low_res"],
+            "blur_kernel_size": 5,
+            "blur_sigma": 1.0,
+            "low_res_size": 16,
         },
     }
 
@@ -260,16 +359,65 @@ def test_train_plan_a_model_writes_records_and_checkpoints(tmp_path: Path, monke
     assert len(summary_payload["epochs"]) == 2
 
 
+def test_train_plan_a_model_source_invariant_smoke(tmp_path: Path, monkeypatch):
+    protocol_config_path = _write_yaml(
+        tmp_path / "protocol_train_source_invariant.yaml",
+        "protocol",
+        _build_source_invariant_protocol("train"),
+    )
+    model_config_path = _write_yaml(
+        tmp_path / "model_source_invariant.yaml",
+        "model",
+        _build_source_invariant_model_payload(),
+    )
+    train_payload = _build_train_payload(tmp_path, epochs=1)
+    train_payload["model_family"] = "frcnet_source_invariant"
+    train_payload["dataloader"].update(
+        {
+            "source_balanced_sampling": True,
+            "batch_composition": {"id_fraction": 0.25, "ambiguous_fraction": 0.25, "ood_fraction": 0.50},
+            "ood_cohorts": ["unknown_supervision"],
+        }
+    )
+    train_payload["loss"].update(
+        {
+            "source_adv_weight": 0.05,
+            "ood_supcon_weight": 0.10,
+            "source_balanced_calibration_weight": 0.05,
+            "ood_supcon_temperature": 0.1,
+        }
+    )
+    train_config_path = _write_yaml(tmp_path / "train_source_invariant.yaml", "train", train_payload)
+
+    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_multisource_datasets())
+
+    outputs = train_plan_a_model(
+        protocol_config_path=protocol_config_path,
+        model_config_path=model_config_path,
+        train_config_path=train_config_path,
+        output_dir=tmp_path / "train_source_invariant_run",
+        run_id="RUN-SOURCE-INVARIANT-TEST",
+    )
+
+    history_rows = list(csv.DictReader(Path(outputs["history_path"]).open("r", encoding="utf-8")))
+    assert history_rows[0]["mean_loss_source_adv"]
+    assert history_rows[0]["mean_loss_ood_supcon"]
+    assert history_rows[0]["mean_loss_source_balanced_calibration"]
+
+
 def test_train_plan_a_model_supports_curriculum_and_validation_selection(tmp_path: Path, monkeypatch):
     train_protocol = _build_protocol("train", cifar_train=True, svhn_split="train")
     validation_protocol = _build_protocol("validation", cifar_train=False, svhn_split="test")
     protocol_config_path = _write_yaml(tmp_path / "protocol_train.yaml", "protocol", train_protocol)
     validation_protocol_path = _write_yaml(tmp_path / "protocol_validation.yaml", "protocol", validation_protocol)
     model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
+    train_payload = _build_curriculum_train_payload(tmp_path)
+    train_payload["checkpointing"]["selection_policies"]["theory"]["checkpoint_name"] = "custom_best_theory.pt"
+    train_payload["checkpointing"]["selection_policies"]["balanced"]["checkpoint_name"] = "custom_best_balanced.pt"
     train_config_path = _write_yaml(
         tmp_path / "train_curriculum.yaml",
         "train",
-        _build_curriculum_train_payload(tmp_path),
+        train_payload,
     )
     eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
     validation_manifest_path = _write_manifest(tmp_path / "validation_manifest.jsonl", validation_protocol)
@@ -296,6 +444,8 @@ def test_train_plan_a_model_supports_curriculum_and_validation_selection(tmp_pat
     assert summary_payload["checkpoints"]["best_policy"] == "balanced"
     assert summary_payload["checkpoints"]["best_epoch"] == 2
     assert summary_payload["checkpoints"]["best_theory_epoch"] == 2
+    assert Path(outputs["best_balanced_checkpoint_path"]).name == "custom_best_balanced.pt"
+    assert Path(outputs["best_theory_checkpoint_path"]).name == "custom_best_theory.pt"
     assert Path(outputs["best_balanced_checkpoint_path"]).exists()
     assert Path(outputs["best_theory_checkpoint_path"]).exists()
     assert Path(outputs["checkpoint_selection_summary_path"]).exists()
@@ -735,3 +885,155 @@ def test_run_plan_a_study_bundle_resumes_completed_seed_outputs(tmp_path: Path, 
     )
 
     assert Path(resumed_outputs["study_paths_path"]).exists()
+
+
+def test_run_plan_a_study_bundle_rejects_stale_train_config_by_default(tmp_path: Path, monkeypatch):
+    train_protocol = _build_protocol("train", cifar_train=True, svhn_split="train")
+    analysis_protocol = _build_protocol("validation", cifar_train=False, svhn_split="test")
+    protocol_train_path = _write_yaml(tmp_path / "protocol_train.yaml", "protocol", train_protocol)
+    protocol_analysis_path = _write_yaml(tmp_path / "protocol_analysis.yaml", "protocol", analysis_protocol)
+    model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
+    train_payload = _build_curriculum_train_payload(tmp_path)
+    train_config_path = _write_yaml(tmp_path / "train_curriculum.yaml", "train", train_payload)
+    eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
+    analysis_config_path = _write_yaml(tmp_path / "analysis.yaml", "analysis", _build_analysis_payload())
+    study_payload = _build_study_payload(tmp_path)
+    study_payload["seeds"] = [7]
+    study_payload["train_protocol_config"] = str(protocol_train_path)
+    study_payload["analysis_protocol_config"] = str(protocol_analysis_path)
+    study_payload["model_config"] = str(model_config_path)
+    study_payload["train_config"] = str(train_config_path)
+    study_payload["eval_config"] = str(eval_config_path)
+    study_payload["analysis_config"] = str(analysis_config_path)
+    study_config_path = _write_yaml(tmp_path / "study.yaml", "study", study_payload)
+
+    monkeypatch.setattr("frcnet.workflows.plan_a.load_plan_a_source_datasets", lambda _: _fake_source_datasets())
+
+    run_plan_a_study_bundle(
+        study_config_path=study_config_path,
+        output_dir=tmp_path / "study_run",
+        aggregate_after_run=False,
+    )
+
+    changed_train_payload = _build_curriculum_train_payload(tmp_path)
+    changed_train_payload["optimizer"]["lr"] = 0.02
+    changed_train_config_path = _write_yaml(
+        tmp_path / "train_curriculum_changed.yaml",
+        "train",
+        changed_train_payload,
+    )
+    changed_study_payload = dict(study_payload)
+    changed_study_payload["train_config"] = str(changed_train_config_path)
+    changed_study_config_path = _write_yaml(tmp_path / "study_changed.yaml", "study", changed_study_payload)
+    with pytest.raises(ValueError, match="stale"):
+        run_plan_a_study_bundle(
+            study_config_path=changed_study_config_path,
+            output_dir=tmp_path / "study_run",
+            aggregate_after_run=False,
+        )
+
+
+def test_run_plan_a_study_bundle_rejects_strict_frozen_control_without_strict_eval(tmp_path: Path):
+    protocol_train_path = _write_yaml(
+        tmp_path / "protocol_train.yaml",
+        "protocol",
+        _build_protocol("train", cifar_train=True, svhn_split="train"),
+    )
+    protocol_analysis_path = _write_yaml(
+        tmp_path / "protocol_analysis.yaml",
+        "protocol",
+        _build_protocol("validation", cifar_train=False, svhn_split="test"),
+    )
+    model_config_path = _write_yaml(tmp_path / "model.yaml", "model", _build_model_payload())
+    train_config_path = _write_yaml(
+        tmp_path / "train_curriculum.yaml",
+        "train",
+        _build_curriculum_train_payload(tmp_path),
+    )
+    eval_config_path = _write_yaml(tmp_path / "eval.yaml", "eval", _build_eval_payload())
+    analysis_config_path = _write_yaml(tmp_path / "analysis.yaml", "analysis", _build_analysis_payload())
+    study_payload = _build_study_payload(tmp_path)
+    study_payload["seeds"] = [7]
+    study_payload["train_protocol_config"] = str(protocol_train_path)
+    study_payload["analysis_protocol_config"] = str(protocol_analysis_path)
+    study_payload["model_config"] = str(model_config_path)
+    study_payload["train_config"] = str(train_config_path)
+    study_payload["eval_config"] = str(eval_config_path)
+    study_payload["analysis_config"] = str(analysis_config_path)
+    study_payload["protocol_controls"] = {"require_strict_frozen_final": True}
+    study_config_path = _write_yaml(tmp_path / "study_strict_invalid.yaml", "study", study_payload)
+
+    with pytest.raises(ValueError, match="require_strict_frozen_final=true"):
+        run_plan_a_study_bundle(
+            study_config_path=study_config_path,
+            output_dir=tmp_path / "study_run",
+            aggregate_after_run=False,
+        )
+
+
+def test_aggregate_rejects_nan_ranking_metric(tmp_path: Path, monkeypatch):
+    study_root = tmp_path / "study_nan"
+    study_root.mkdir()
+    study_paths = {
+        "study_id": "study_nan",
+        "model_family": "frcnet_explicit_unknown",
+        "shared_eval_manifest_path": "manifest.jsonl",
+        "primary_checkpoint_policy": "balanced",
+        "companion_checkpoint_policies": [],
+        "seeds": [7],
+        "runs": [
+            {
+                "run_id": "study_nan-seed007",
+                "output_dir": str(study_root / "runs" / "study_nan-seed007"),
+                "analysis": {},
+                "report": {},
+            }
+        ],
+    }
+    (study_root / "study_paths.json").write_text(json.dumps(study_paths), encoding="utf-8")
+    study_config_path = _write_yaml(
+        tmp_path / "study_nan.yaml",
+        "study",
+        {
+            "study_id": "study_nan",
+            "report_policy": {"ranking_metric": "unseen_ood_cifar100_pair_auroc"},
+        },
+    )
+    monkeypatch.setattr(
+        "frcnet.workflows.study._collect_run_metric",
+        lambda study_id, seed, run_output: StudyRunMetric(
+            study_id=study_id,
+            model_family="frcnet_explicit_unknown",
+            run_id=str(run_output["run_id"]),
+            seed=seed,
+            pair_auroc=0.5,
+            weighted_pair_auroc=0.5,
+            scalar_auroc=0.4,
+            easy_id_top1_accuracy=0.8,
+            hard_id_top1_accuracy=0.7,
+            ambiguous_candidate_hit_rate=0.6,
+            run_output_dir=str(run_output["output_dir"]),
+            unseen_ood_cifar100_pair_auroc=math.nan,
+        ),
+    )
+    monkeypatch.setattr("frcnet.workflows.study._collect_source_slice_rows", lambda **kwargs: [])
+    monkeypatch.setattr(
+        "frcnet.workflows.study._collect_policy_metric",
+        lambda *args, **kwargs: CheckpointPolicyMetric(
+            study_id="study_nan",
+            model_family="frcnet_explicit_unknown",
+            run_id="study_nan-seed007",
+            seed=7,
+            policy_name="balanced",
+            pair_auroc=0.5,
+            weighted_pair_auroc=0.5,
+            scalar_auroc=0.4,
+            easy_id_top1_accuracy=0.8,
+            hard_id_top1_accuracy=0.7,
+            ambiguous_candidate_hit_rate=0.6,
+            run_output_dir=str(study_root),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="missing or NaN"):
+        aggregate_plan_a_study_bundle(study_root=study_root, study_config_path=study_config_path)

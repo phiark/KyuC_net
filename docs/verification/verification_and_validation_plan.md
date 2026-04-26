@@ -3,7 +3,7 @@
 - document_id: ver_verification_and_validation_plan
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-22
+- last_updated: 2026-04-26
 
 ## 1. 目标
 
@@ -41,6 +41,15 @@
 - `VER-CON-009`: frozen matched manifest hash 对同配置稳定, 对 reference score 改动敏感
 - `VER-CON-010`: V0.6 manifest roundtrip 保留 `source_domain_name` 与 `source_domain_label`
 - `VER-CON-011`: V0.6 CIFAR-100 不得进入 train 或 validation manifest
+- `VER-CON-012`: V0.6B GRL 必须反转 backbone feature 梯度方向
+- `VER-CON-013`: V0.6B source-invariant losses 缺少 source provenance 或 source logits 时必须失败
+- `VER-CON-014`: V0.6B OOD SupCon 在没有跨源 positive 时必须返回 connected zero 且不产生 NaN
+- `VER-CON-015`: V0.6C CIFAR-100 seen/unseen class sets 必须严格等于 `[0,50)` / `[50,100)` 且不相交
+- `VER-CON-016`: V0.6C final held-out records 必须使用 `source_role=unseen_ood_classes`
+- `VER-CON-017`: V0.6C source-weighted sampler 必须提升 near-OOD 抽样权重但保持 batch composition
+- `VER-CON-018`: custom checkpoint names 必须被 checkpoint writer 与 study loader 同时遵循
+- `VER-CON-019`: stale resume provenance hash 默认必须失败
+- `VER-CON-020`: aggregate ranking metric 或 required source slice 缺失/NaN 时必须抛错
 
 ### 2.3 Integration Verification
 
@@ -68,6 +77,15 @@
 - `VER-INT-020`: V0.5 final report 为 seen SVHN OOD、unseen CIFAR-100 OOD 和 all OOD 分别生成 frozen matched benchmark
 - `VER-INT-021`: V0.6 source-balanced sampler 在 batch 内平衡 OOD/unknown source
 - `VER-INT-022`: V0.6 aggregate 输出 source slice metrics、worst-source AUROC、seen-unseen gap 和 pair-scalar delta
+- `VER-INT-023`: V0.6B source-balanced sampler 支持 5 个 OOD/unknown sources
+- `VER-INT-024`: V0.6B study 在 `require_source_overlap_zero=true` 时强制检查 train、validation 与 final source fingerprint overlap
+- `VER-INT-025`: V0.6B aggregate 输出 `seen_ood_tiny_imagenet_pair_auroc`
+- `VER-INT-026`: V0.6C 小样本 manifest chain 能生成 train/validation/final class-holdout manifests
+- `VER-INT-027`: OOD-only batch 在 source adversary / SupCon / source calibration 有有效样本时执行 optimizer step
+- `VER-INT-028`: `protocol_controls` 声明与 protocol/train/eval 配置不一致时 study preflight 失败
+- `VER-INT-029`: unchanged study 可以 resume, changed config 在 `fail_on_stale` 下失败
+- `VER-INT-030`: V0.6C aggregate 比较 `near_ood_balanced`, `balanced`, and `theory`
+- `VER-INT-031`: `git ls-files -ci --exclude-standard` 对普通提交应为空或仅包含显式白名单
 
 ### 2.4 Scientific Validation
 
@@ -80,6 +98,7 @@
 - `VER-SCI-005`: v0.2 final test 达到 release gate 或明确标记 partial/negative evidence
 - `VER-SCI-006`: v0.5 final test 的 unseen OOD 结论仅来自 CIFAR-100 final-only slice
 - `VER-SCI-007`: v0.6 final test 以 CIFAR-100 LOSO、worst-source AUROC 与 seen-unseen gap 判断修复等级
+- `VER-SCI-008`: v0.6C final test 以 unseen CIFAR100 held-out classes、seen near-OOD 与 worst-source AUROC 判断修复等级
 
 ## 3. 需求到验证映射
 
@@ -114,9 +133,18 @@
 | `REQ-FN-043` | `VER-CON-011`, `VER-INT-021` |
 | `REQ-FN-044` | `VER-INT-021` |
 | `REQ-FN-045` | `VER-INT-022` |
+| `REQ-FN-046` | `VER-CON-012`, `VER-CON-013`, `VER-CON-014` |
+| `REQ-FN-047` | `VER-INT-025` |
+| `REQ-FN-048` | `VER-CON-015`, `VER-INT-026` |
+| `REQ-FN-049` | `VER-CON-017`, `VER-INT-021` |
+| `REQ-FN-050` | `VER-CON-018`, `VER-INT-030` |
+| `REQ-FN-051` | `VER-CON-019`, `VER-INT-029` |
+| `REQ-FN-052` | `VER-INT-028`, `VER-INT-024` |
+| `REQ-FN-053` | `VER-CON-020`, `VER-INT-022` |
 | `REQ-SCI-001` | `VER-SCI-001` |
 | `REQ-SCI-002` | `VER-SCI-002` |
 | `REQ-SCI-009` | `VER-SCI-007` |
+| `REQ-SCI-011` | `VER-SCI-008` |
 | `REQ-SCI-003` | `VER-SCI-004` |
 | `REQ-SCI-004` | `VER-INT-009` |
 | `REQ-SCI-005` | `VER-CON-007`, `VER-SCI-003` |

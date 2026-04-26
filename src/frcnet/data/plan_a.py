@@ -7,7 +7,7 @@ import json
 import random
 import tarfile
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 import urllib.request
 import warnings
 
@@ -191,8 +191,22 @@ def _download_file(url: str, output_path: Path) -> None:
     urllib.request.urlretrieve(url, output_path)
 
 
+def _validate_archive_member(output_root: Path, member_name: str) -> None:
+    resolved_root = output_root.resolve()
+    resolved_member = (output_root / member_name).resolve()
+    try:
+        resolved_member.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"Archive member would extract outside output root: {member_name}") from exc
+
+
 def _extract_tarball(input_path: Path, output_root: Path) -> None:
+    output_root.mkdir(parents=True, exist_ok=True)
     with tarfile.open(input_path, "r:gz") as archive:
+        for member in archive.getmembers():
+            if member.issym() or member.islnk() or member.isdev():
+                raise ValueError(f"Refusing to extract unsafe tar member: {member.name}")
+            _validate_archive_member(output_root, member.name)
         archive.extractall(output_root)
 
 
@@ -278,6 +292,10 @@ def _source_partition_config(protocol_config: Mapping[str, Any], dataset_name: s
 
 def _source_partition_name(protocol_config: Mapping[str, Any], dataset_name: str) -> str:
     partition_config = _source_partition_config(protocol_config, dataset_name)
+    return _partition_name(partition_config)
+
+
+def _partition_name(partition_config: Mapping[str, Any]) -> str:
     return str(partition_config.get("name", "all"))
 
 
@@ -318,6 +336,78 @@ def _partition_global_indices(indices: Iterable[int], partition_config: Mapping[
     stop_value = partition_config.get("index_stop", partition_config.get("global_index_stop"))
     stop = None if stop_value is None else int(stop_value)
     return selected[start:stop]
+
+
+def _allowed_class_labels(partition_config: Mapping[str, Any]) -> frozenset[int] | None:
+    explicit_labels = partition_config.get("allowed_class_labels")
+    if explicit_labels is not None:
+        return frozenset(int(label) for label in explicit_labels)
+
+    has_label_start = "class_label_start" in partition_config
+    has_label_stop = "class_label_stop" in partition_config
+    if not has_label_start and not has_label_stop:
+        return None
+
+    start = int(partition_config.get("class_label_start", 0))
+    stop_value = partition_config.get("class_label_stop")
+    if stop_value is None:
+        raise ValueError("class_label_stop is required when class_label_start is used.")
+    stop = int(stop_value)
+    if stop < start:
+        raise ValueError("class_label_stop must be >= class_label_start.")
+    return frozenset(range(start, stop))
+
+
+def _filter_indices_by_class_labels(
+    indices: Iterable[int],
+    labels: Sequence[int],
+    partition_config: Mapping[str, Any],
+) -> list[int]:
+    allowed_labels = _allowed_class_labels(partition_config)
+    if allowed_labels is None:
+        return list(indices)
+    return [int(index) for index in indices if int(labels[int(index)]) in allowed_labels]
+
+
+_SOURCE_PARTITION_OVERRIDE_KEYS = frozenset(
+    {
+        "name",
+        "source_partition_name",
+        "index_start",
+        "index_stop",
+        "global_index_start",
+        "global_index_stop",
+        "class_label_start",
+        "class_label_stop",
+        "allowed_class_labels",
+    }
+)
+
+
+def _source_partition_for_entry(
+    protocol_config: Mapping[str, Any],
+    dataset_name: str,
+    source_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    partition_config = dict(_source_partition_config(protocol_config, dataset_name))
+    for key in _SOURCE_PARTITION_OVERRIDE_KEYS:
+        if key in source_config:
+            target_key = "name" if key == "source_partition_name" else key
+            partition_config[target_key] = source_config[key]
+    return partition_config
+
+
+def _has_source_partition_override(source_config: Mapping[str, Any]) -> bool:
+    return any(key in source_config for key in _SOURCE_PARTITION_OVERRIDE_KEYS)
+
+
+def _partitioned_dataset_indices(
+    *,
+    labels: Sequence[int],
+    partition_config: Mapping[str, Any],
+) -> list[int]:
+    filtered_indices = _filter_indices_by_class_labels(range(len(labels)), labels, partition_config)
+    return _partition_global_indices(filtered_indices, partition_config)
 
 
 def _partition_class_indices(
@@ -437,15 +527,16 @@ def build_plan_a_manifest(
         if dataset_name == "cifar10":
             continue
         labels = _extract_labels(dataset)
-        indices = _partition_global_indices(
-            range(len(labels)),
-            _source_partition_config(protocol_config, dataset_name),
+        partition_config = _source_partition_config(protocol_config, dataset_name)
+        indices = _partitioned_dataset_indices(
+            labels=labels,
+            partition_config=partition_config,
         )
         rng.shuffle(indices)
         dataset_index_pools[dataset_name] = indices
         dataset_labels[dataset_name] = labels
         dataset_splits[dataset_name] = _dataset_split_name(dataset_name, _dataset_config(protocol_config, dataset_name))
-        dataset_partitions[dataset_name] = _source_partition_name(protocol_config, dataset_name)
+        dataset_partitions[dataset_name] = _partition_name(partition_config)
 
     manifest_records: list[SampleManifestRecord] = []
     analysis_config = protocol_config["analysis"]
@@ -570,8 +661,16 @@ def build_plan_a_manifest(
         if source_count <= 0:
             continue
         source_role = str(ood_source.get("source_role", _source_role(protocol_config, dataset_name, "ood_source")))
-        source_indices = _pop_indices(dataset_index_pools[dataset_name], source_count)
         labels = dataset_labels[dataset_name]
+        if _has_source_partition_override(ood_source):
+            partition_config = _source_partition_for_entry(protocol_config, dataset_name, ood_source)
+            source_pool = _partitioned_dataset_indices(labels=labels, partition_config=partition_config)
+            rng.shuffle(source_pool)
+            partition_name = _partition_name(partition_config)
+        else:
+            source_pool = dataset_index_pools[dataset_name]
+            partition_name = dataset_partitions[dataset_name]
+        source_indices = _pop_indices(source_pool, source_count)
         for index in source_indices:
             manifest_records.append(
                 SampleManifestRecord(
@@ -588,7 +687,7 @@ def build_plan_a_manifest(
                     source_class_labels=(int(labels[index]),),
                     source_dataset_split=dataset_splits[dataset_name],
                     source_role=source_role,
-                    source_partition_name=str(ood_source.get("source_partition_name", dataset_partitions[dataset_name])),
+                    source_partition_name=str(ood_source.get("source_partition_name", partition_name)),
                     source_domain_name=_source_domain_name(protocol_config, dataset_name),
                     source_domain_label=_source_domain_label(protocol_config, dataset_name),
                 )
@@ -616,8 +715,16 @@ def build_plan_a_manifest(
         source_role = str(
             unknown_source.get("source_role", _source_role(protocol_config, dataset_name, "seen_unknown_source"))
         )
-        source_indices = _pop_indices(dataset_index_pools[dataset_name], source_count)
         labels = dataset_labels[dataset_name]
+        if _has_source_partition_override(unknown_source):
+            partition_config = _source_partition_for_entry(protocol_config, dataset_name, unknown_source)
+            source_pool = _partitioned_dataset_indices(labels=labels, partition_config=partition_config)
+            rng.shuffle(source_pool)
+            partition_name = _partition_name(partition_config)
+        else:
+            source_pool = dataset_index_pools[dataset_name]
+            partition_name = dataset_partitions[dataset_name]
+        source_indices = _pop_indices(source_pool, source_count)
         for index in source_indices:
             manifest_records.append(
                 SampleManifestRecord(
@@ -634,9 +741,7 @@ def build_plan_a_manifest(
                     source_class_labels=(int(labels[index]),),
                     source_dataset_split=dataset_splits[dataset_name],
                     source_role=source_role,
-                    source_partition_name=str(
-                        unknown_source.get("source_partition_name", dataset_partitions[dataset_name])
-                    ),
+                    source_partition_name=str(unknown_source.get("source_partition_name", partition_name)),
                     source_domain_name=_source_domain_name(protocol_config, dataset_name),
                     source_domain_label=_source_domain_label(protocol_config, dataset_name),
                 )

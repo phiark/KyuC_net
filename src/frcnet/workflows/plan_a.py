@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import csv
 import json
@@ -37,6 +37,7 @@ from frcnet.data import (
     collate_manifest_samples,
     load_plan_a_source_datasets,
     read_manifest_jsonl,
+    source_fingerprint_overlap,
     summarize_manifest,
     validate_manifest_records,
     write_manifest_jsonl,
@@ -90,6 +91,9 @@ class TrainEpochSummary:
     mean_loss_id: float
     mean_loss_unknown: float
     mean_loss_unknown_content: float
+    mean_loss_source_adv: float
+    mean_loss_ood_supcon: float
+    mean_loss_source_balanced_calibration: float
     mean_loss_ambiguous: float
     mean_loss_hard_resolution_floor: float
     mean_loss_hard_entropy_ceiling: float
@@ -141,8 +145,12 @@ class ValidationEpochSummary:
     hard_id_top1_accuracy: float
     ambiguous_candidate_hit_rate: float
     balanced_score: float = 0.0
+    near_ood_balanced_score: float = 0.0
+    near_ood_floor_met: bool = False
+    source_slice_pair_aurocs: dict[str, float] = field(default_factory=dict)
     selected_as_best_theory: bool = False
     selected_as_best_balanced: bool = False
+    selected_as_best_near_ood_balanced: bool = False
 
     def to_csv_row(self) -> dict[str, int | float]:
         return {
@@ -155,9 +163,13 @@ class ValidationEpochSummary:
             "hard_id_top1_accuracy": self.hard_id_top1_accuracy,
             "ambiguous_candidate_hit_rate": self.ambiguous_candidate_hit_rate,
             "balanced_score": self.balanced_score,
+            "near_ood_balanced_score": self.near_ood_balanced_score,
+            "near_ood_floor_met": int(self.near_ood_floor_met),
+            "source_slice_pair_aurocs_json": json.dumps(self.source_slice_pair_aurocs, sort_keys=True),
             "selected_as_best": int(self.selected_as_best_theory),
             "selected_as_best_theory": int(self.selected_as_best_theory),
             "selected_as_best_balanced": int(self.selected_as_best_balanced),
+            "selected_as_best_near_ood_balanced": int(self.selected_as_best_near_ood_balanced),
         }
 
 
@@ -299,11 +311,60 @@ def _benchmark_slice_config(
         "require_matched_manifest",
         "test_size",
         "random_state",
+        "positive_source_dataset_name",
+        "negative_source_dataset_name",
+        "positive_source_role",
+        "negative_source_role",
+        "positive_source_partition_name",
+        "negative_source_partition_name",
     ):
         if key in benchmark_slice:
             merged[key] = benchmark_slice[key]
     merged["benchmark_name"] = str(benchmark_slice.get("benchmark_name", "matched_ambiguous_vs_ood"))
     return merged
+
+
+def _record_matches_source_filter(
+    record,
+    *,
+    source_dataset_name: str = "",
+    source_role: str = "",
+    source_partition_name: str = "",
+) -> bool:
+    if source_dataset_name and record.source_dataset_name != source_dataset_name:
+        return False
+    if source_role and record.source_role != source_role:
+        return False
+    if source_partition_name and record.source_partition_name != source_partition_name:
+        return False
+    return True
+
+
+def _filter_records_for_benchmark_config(
+    sample_analysis_records: list,
+    benchmark_config: Mapping[str, Any],
+) -> list:
+    positive_cohort = str(benchmark_config.get("positive_cohort", "ambiguous_id"))
+    negative_cohort = str(benchmark_config.get("negative_cohort", "ood"))
+    filtered_records = []
+    for record in sample_analysis_records:
+        if record.cohort_name == positive_cohort:
+            if _record_matches_source_filter(
+                record,
+                source_dataset_name=str(benchmark_config.get("positive_source_dataset_name", "")),
+                source_role=str(benchmark_config.get("positive_source_role", "")),
+                source_partition_name=str(benchmark_config.get("positive_source_partition_name", "")),
+            ):
+                filtered_records.append(record)
+        elif record.cohort_name == negative_cohort:
+            if _record_matches_source_filter(
+                record,
+                source_dataset_name=str(benchmark_config.get("negative_source_dataset_name", "")),
+                source_role=str(benchmark_config.get("negative_source_role", "")),
+                source_partition_name=str(benchmark_config.get("negative_source_partition_name", "")),
+            ):
+                filtered_records.append(record)
+    return filtered_records
 
 
 def _safe_artifact_stem(value: str) -> str:
@@ -421,6 +482,7 @@ def _build_manifest_dataloader(
             id_cohorts=tuple(dataloader_config.get("id_cohorts", ("easy_id", "hard_id"))),
             ambiguous_cohorts=tuple(dataloader_config.get("ambiguous_cohorts", ("ambiguous_id",))),
             ood_cohorts=tuple(dataloader_config.get("ood_cohorts", ("unknown_supervision", "ood"))),
+            source_weights=dict(dataloader_config.get("source_weights", {})) or None,
         )
         return DataLoader(
             dataset,
@@ -651,6 +713,10 @@ def _build_model(model_config: Mapping[str, Any]) -> FRCNetModel:
         backbone_name=model_config["backbone"],
         resolution_temperature=float(model_config["resolution_temperature"]),
         content_temperature=float(model_config["content_temperature"]),
+        source_adversary_enabled=bool(model_config.get("source_adversary_enabled", False)),
+        num_source_domains=int(model_config.get("num_source_domains", 0)),
+        grl_lambda=float(model_config.get("grl_lambda", 1.0)),
+        source_head_hidden_dim=int(model_config.get("source_head_hidden_dim", 128)),
     )
 
 
@@ -764,8 +830,77 @@ def _balanced_validation_score(
     return sum(score_terms) / weight_total
 
 
+def _near_ood_validation_score(
+    validation_summary: ValidationEpochSummary,
+    policy_config: Mapping[str, Any],
+) -> tuple[float, bool]:
+    configured_slice_names = tuple(str(value) for value in policy_config.get("slice_names", ()))
+    if configured_slice_names:
+        selected_slice_names = configured_slice_names
+    else:
+        selected_slice_names = tuple(
+            sorted(
+                slice_name
+                for slice_name in validation_summary.source_slice_pair_aurocs
+                if "tiny_imagenet" in slice_name or "cifar100_seen" in slice_name
+            )
+        )
+
+    score_weights = {
+        str(key): float(value) for key, value in dict(policy_config.get("score_weights", {})).items()
+    }
+    score_terms: list[float] = []
+    weight_terms: list[float] = []
+    for slice_name in selected_slice_names:
+        if slice_name not in validation_summary.source_slice_pair_aurocs:
+            continue
+        weight = score_weights.get(slice_name, 1.0)
+        if weight <= 0.0:
+            continue
+        score_terms.append(weight * float(validation_summary.source_slice_pair_aurocs[slice_name]))
+        weight_terms.append(weight)
+    if score_terms:
+        score = sum(score_terms) / sum(weight_terms)
+    else:
+        score = validation_summary.balanced_score or validation_summary.pair_auroc
+
+    metric_floors = dict(policy_config.get("metric_floors", {}))
+    hard_floor = float(
+        metric_floors.get(
+            "hard_id_top1_accuracy",
+            policy_config.get("hard_id_top1_accuracy_floor", 0.0),
+        )
+    )
+    ambiguous_floor = float(
+        metric_floors.get(
+            "ambiguous_candidate_hit_rate",
+            policy_config.get("ambiguous_candidate_hit_rate_floor", 0.0),
+        )
+    )
+    floor_met = (
+        validation_summary.hard_id_top1_accuracy >= hard_floor
+        and validation_summary.ambiguous_candidate_hit_rate >= ambiguous_floor
+    )
+    return score, floor_met
+
+
 def _resolve_primary_checkpoint_policy(checkpoint_config: Mapping[str, Any]) -> str:
     return str(checkpoint_config.get("primary_policy", "theory"))
+
+
+def _selection_policy_checkpoint_name(
+    selection_policy_config: Mapping[str, Any],
+    policy_name: str,
+    default_name: str,
+) -> str:
+    policy_config = dict(selection_policy_config.get(policy_name, {}))
+    checkpoint_name = str(policy_config.get("checkpoint_name", default_name))
+    if not checkpoint_name or Path(checkpoint_name).name != checkpoint_name or "\\" in checkpoint_name:
+        raise ValueError(
+            f"train.checkpointing.selection_policies.{policy_name}.checkpoint_name must be a file name, "
+            f"got `{checkpoint_name}`."
+        )
+    return checkpoint_name
 
 
 def _selection_policy_eligible_phases(
@@ -855,6 +990,20 @@ def _write_balanced_vs_theory_checkpoint_table(
     return output
 
 
+def enforce_zero_source_overlap(
+    named_manifests: Mapping[str, Sequence],
+) -> None:
+    manifest_items = list(named_manifests.items())
+    for left_index, (left_name, left_records) in enumerate(manifest_items):
+        for right_name, right_records in manifest_items[left_index + 1 :]:
+            overlap = source_fingerprint_overlap(left_records, right_records)
+            if overlap:
+                preview = ", ".join(str(item) for item in sorted(overlap)[:5])
+                raise ValueError(
+                    f"Source fingerprint overlap detected between `{left_name}` and `{right_name}`: {preview}"
+                )
+
+
 def _evaluate_validation_epoch(
     *,
     epoch: int,
@@ -886,6 +1035,28 @@ def _evaluate_validation_epoch(
         random_state=int(resolved_eval_config["random_state"]),
         matched_manifest_records=_read_optional_matched_manifest(resolved_eval_config),
     )
+    source_slice_pair_aurocs: dict[str, float] = {}
+    for benchmark_slice in tuple(resolved_eval_config.get("benchmark_slices", ())):
+        slice_config = _benchmark_slice_config(resolved_eval_config, benchmark_slice)
+        if _read_optional_matched_manifest(slice_config) is not None:
+            continue
+        slice_records = _filter_records_for_benchmark_config(sample_analysis_records, slice_config)
+        try:
+            slice_summary = summarize_matched_ambiguous_vs_ood(
+                slice_records,
+                positive_cohort=str(slice_config["positive_cohort"]),
+                negative_cohort=str(slice_config["negative_cohort"]),
+                primary_pair=str(slice_config["primary_pair"]),
+                weighted_pair=str(slice_config["secondary_pair"]),
+                primary_scalar=str(slice_config["primary_scalar"]),
+                completion_scan_scalars=tuple(slice_config["completion_scan_scalars"]),
+                test_size=float(slice_config["test_size"]),
+                random_state=int(slice_config["random_state"]),
+                matched_manifest_records=None,
+            )
+        except ValueError:
+            continue
+        source_slice_pair_aurocs[str(slice_config["benchmark_name"])] = slice_summary.pair_auroc
     validation_summary = ValidationEpochSummary(
         epoch=epoch,
         phase_name=phase_name,
@@ -895,6 +1066,7 @@ def _evaluate_validation_epoch(
         easy_id_top1_accuracy=_proposition_accuracy(proposition_records, "easy_id"),
         hard_id_top1_accuracy=_proposition_accuracy(proposition_records, "hard_id"),
         ambiguous_candidate_hit_rate=_proposition_accuracy(proposition_records, "ambiguous_id"),
+        source_slice_pair_aurocs=source_slice_pair_aurocs,
     )
     validation_summary.balanced_score = _balanced_validation_score(validation_summary)
     return validation_summary
@@ -948,6 +1120,9 @@ def _run_training_epoch(
     loss_id_sum = 0.0
     loss_unknown_sum = 0.0
     loss_unknown_content_sum = 0.0
+    loss_source_adv_sum = 0.0
+    loss_ood_supcon_sum = 0.0
+    loss_source_balanced_calibration_sum = 0.0
     loss_ambiguous_sum = 0.0
     loss_hard_resolution_floor_sum = 0.0
     loss_hard_entropy_ceiling_sum = 0.0
@@ -970,6 +1145,11 @@ def _run_training_epoch(
             loss_id_sum += float(loss_breakdown.loss_id.detach().item())
             loss_unknown_sum += float(loss_breakdown.loss_unknown.detach().item())
             loss_unknown_content_sum += float(loss_breakdown.loss_unknown_content.detach().item())
+            loss_source_adv_sum += float(loss_breakdown.loss_source_adv.detach().item())
+            loss_ood_supcon_sum += float(loss_breakdown.loss_ood_supcon.detach().item())
+            loss_source_balanced_calibration_sum += float(
+                loss_breakdown.loss_source_balanced_calibration.detach().item()
+            )
             loss_ambiguous_sum += float(loss_breakdown.loss_ambiguous.detach().item())
             loss_hard_resolution_floor_sum += float(loss_breakdown.loss_hard_resolution_floor.detach().item())
             loss_hard_entropy_ceiling_sum += float(loss_breakdown.loss_hard_entropy_ceiling.detach().item())
@@ -1006,6 +1186,9 @@ def _run_training_epoch(
         mean_loss_id=loss_id_sum / denominator,
         mean_loss_unknown=loss_unknown_sum / denominator,
         mean_loss_unknown_content=loss_unknown_content_sum / denominator,
+        mean_loss_source_adv=loss_source_adv_sum / denominator,
+        mean_loss_ood_supcon=loss_ood_supcon_sum / denominator,
+        mean_loss_source_balanced_calibration=loss_source_balanced_calibration_sum / denominator,
         mean_loss_ambiguous=loss_ambiguous_sum / denominator,
         mean_loss_hard_resolution_floor=loss_hard_resolution_floor_sum / denominator,
         mean_loss_hard_entropy_ceiling=loss_hard_entropy_ceiling_sum / denominator,
@@ -1180,10 +1363,13 @@ def train_plan_a_model(
     checkpoint_config = dict(train_config.get("checkpointing", {}))
     selection_policy_config = dict(checkpoint_config.get("selection_policies", {}))
     balanced_policy_config = dict(selection_policy_config.get("balanced", {}))
+    near_ood_policy_config = dict(selection_policy_config.get("near_ood_balanced", {}))
     balanced_score_weights = balanced_policy_config.get("score_weights")
     primary_policy_name = _resolve_primary_checkpoint_policy(checkpoint_config)
-    if primary_policy_name not in {"theory", "balanced"}:
-        raise ValueError("train.checkpointing.primary_policy must be either `theory` or `balanced`.")
+    if primary_policy_name not in {"theory", "balanced", "near_ood_balanced"}:
+        raise ValueError(
+            "train.checkpointing.primary_policy must be one of `theory`, `balanced`, or `near_ood_balanced`."
+        )
     save_every_epochs = int(checkpoint_config.get("save_every_epochs", 1))
     base_dataloader_config = dict(protocol_config.get("analysis", {}).get("dataloader", {}))
     base_dataloader_config.update(train_config.get("dataloader", {}))
@@ -1192,8 +1378,21 @@ def train_plan_a_model(
     epoch_history: list[TrainEpochSummary] = []
     validation_history: list[ValidationEpochSummary] = []
     best_checkpoint_path = checkpoints_dir / "checkpoint_best.pt"
-    best_theory_checkpoint_path = checkpoints_dir / "checkpoint_best_theory.pt"
-    best_balanced_checkpoint_path = checkpoints_dir / "checkpoint_best_balanced.pt"
+    best_theory_checkpoint_path = checkpoints_dir / _selection_policy_checkpoint_name(
+        selection_policy_config,
+        "theory",
+        "checkpoint_best_theory.pt",
+    )
+    best_balanced_checkpoint_path = checkpoints_dir / _selection_policy_checkpoint_name(
+        selection_policy_config,
+        "balanced",
+        "checkpoint_best_balanced.pt",
+    )
+    best_near_ood_checkpoint_path = checkpoints_dir / _selection_policy_checkpoint_name(
+        selection_policy_config,
+        "near_ood_balanced",
+        "checkpoint_best_near_ood_balanced.pt",
+    )
     last_checkpoint_path = checkpoints_dir / "checkpoint_last.pt"
     best_theory_mean_loss: float | None = None
     best_theory_validation_summary: ValidationEpochSummary | None = None
@@ -1203,6 +1402,10 @@ def train_plan_a_model(
     best_balanced_validation_summary: ValidationEpochSummary | None = None
     best_balanced_epoch_summary: TrainEpochSummary | None = None
     best_balanced_epoch = 0
+    best_near_ood_mean_loss: float | None = None
+    best_near_ood_validation_summary: ValidationEpochSummary | None = None
+    best_near_ood_epoch_summary: TrainEpochSummary | None = None
+    best_near_ood_epoch = 0
     last_epoch_summary: TrainEpochSummary | None = None
     last_validation_summary: ValidationEpochSummary | None = None
 
@@ -1336,6 +1539,11 @@ def train_plan_a_model(
             validation_summary: ValidationEpochSummary | None = None
             theory_phase_eligible = _is_policy_phase_eligible(selection_policy_config, "theory", phase.name)
             balanced_phase_eligible = _is_policy_phase_eligible(selection_policy_config, "balanced", phase.name)
+            near_ood_phase_eligible = _is_policy_phase_eligible(
+                selection_policy_config,
+                "near_ood_balanced",
+                phase.name,
+            )
             if validation_dataloader is not None:
                 validation_summary = _evaluate_validation_epoch(
                     epoch=global_epoch,
@@ -1351,6 +1559,10 @@ def train_plan_a_model(
                     validation_summary,
                     weights=balanced_score_weights,
                 )
+                (
+                    validation_summary.near_ood_balanced_score,
+                    validation_summary.near_ood_floor_met,
+                ) = _near_ood_validation_score(validation_summary, near_ood_policy_config)
                 validation_history.append(validation_summary)
             last_epoch_summary = epoch_summary
             last_validation_summary = validation_summary
@@ -1386,6 +1598,9 @@ def train_plan_a_model(
                 f"loss_id={epoch_summary.mean_loss_id:.4f} "
                 f"loss_unknown={epoch_summary.mean_loss_unknown:.4f} "
                 f"loss_unknown_content={epoch_summary.mean_loss_unknown_content:.4f} "
+                f"loss_source_adv={epoch_summary.mean_loss_source_adv:.4f} "
+                f"loss_ood_supcon={epoch_summary.mean_loss_ood_supcon:.4f} "
+                f"loss_source_cal={epoch_summary.mean_loss_source_balanced_calibration:.4f} "
                 f"loss_ambiguous={epoch_summary.mean_loss_ambiguous:.4f} "
                 f"loss_hard_resolution={epoch_summary.mean_loss_hard_resolution_floor:.4f} "
                 f"loss_hard_entropy={epoch_summary.mean_loss_hard_entropy_ceiling:.4f} "
@@ -1404,6 +1619,7 @@ def train_plan_a_model(
             if validation_summary is None:
                 theory_updated = False
                 balanced_updated = False
+                near_ood_updated = False
                 if theory_phase_eligible and (
                     best_theory_mean_loss is None or epoch_summary.mean_loss_total <= best_theory_mean_loss
                 ):
@@ -1446,8 +1662,31 @@ def train_plan_a_model(
                         progress_callback,
                         f"[train] best_balanced_checkpoint_updated epoch={global_epoch} criterion=train_mean_loss_total",
                     )
+                if near_ood_phase_eligible and (
+                    best_near_ood_mean_loss is None or epoch_summary.mean_loss_total <= best_near_ood_mean_loss
+                ):
+                    best_near_ood_mean_loss = epoch_summary.mean_loss_total
+                    best_near_ood_epoch_summary = epoch_summary
+                    best_near_ood_epoch = global_epoch
+                    _save_checkpoint(
+                        best_near_ood_checkpoint_path,
+                        run_id=resolved_run_id,
+                        epoch=global_epoch,
+                        protocol_id=protocol_config["protocol_id"],
+                        model=model,
+                        optimizer=optimizer,
+                        epoch_summary=epoch_summary,
+                        validation_summary=validation_summary,
+                    )
+                    near_ood_updated = True
+                    _emit_progress(
+                        progress_callback,
+                        f"[train] best_near_ood_checkpoint_updated epoch={global_epoch} criterion=train_mean_loss_total",
+                    )
                 if (primary_policy_name == "theory" and theory_updated) or (
                     primary_policy_name == "balanced" and balanced_updated
+                ) or (
+                    primary_policy_name == "near_ood_balanced" and near_ood_updated
                 ):
                     _save_primary_checkpoint_alias(
                         epoch_summary=epoch_summary,
@@ -1457,6 +1696,7 @@ def train_plan_a_model(
 
             theory_updated = False
             balanced_updated = False
+            near_ood_updated = False
             theory_candidate_rank = (
                 validation_summary.pair_auroc,
                 validation_summary.easy_id_top1_accuracy,
@@ -1534,8 +1774,53 @@ def train_plan_a_model(
                         f"criterion=validation_balanced_score_then_pair_auroc_then_train_mean_loss"
                     ),
                 )
+            near_ood_floor_bonus = 1 if validation_summary.near_ood_floor_met else 0
+            near_ood_candidate_rank = (
+                near_ood_floor_bonus,
+                validation_summary.near_ood_balanced_score,
+                validation_summary.balanced_score,
+                -epoch_summary.mean_loss_total,
+            )
+            near_ood_best_rank = None
+            if best_near_ood_validation_summary is not None and best_near_ood_mean_loss is not None:
+                near_ood_best_rank = (
+                    1 if best_near_ood_validation_summary.near_ood_floor_met else 0,
+                    best_near_ood_validation_summary.near_ood_balanced_score,
+                    best_near_ood_validation_summary.balanced_score,
+                    -best_near_ood_mean_loss,
+                )
+            if near_ood_phase_eligible and (
+                near_ood_best_rank is None or near_ood_candidate_rank > near_ood_best_rank
+            ):
+                if best_near_ood_validation_summary is not None:
+                    best_near_ood_validation_summary.selected_as_best_near_ood_balanced = False
+                best_near_ood_mean_loss = epoch_summary.mean_loss_total
+                best_near_ood_validation_summary = validation_summary
+                best_near_ood_epoch_summary = epoch_summary
+                best_near_ood_epoch = global_epoch
+                validation_summary.selected_as_best_near_ood_balanced = True
+                _save_checkpoint(
+                    best_near_ood_checkpoint_path,
+                    run_id=resolved_run_id,
+                    epoch=global_epoch,
+                    protocol_id=protocol_config["protocol_id"],
+                    model=model,
+                    optimizer=optimizer,
+                    epoch_summary=epoch_summary,
+                    validation_summary=validation_summary,
+                )
+                near_ood_updated = True
+                _emit_progress(
+                    progress_callback,
+                    (
+                        f"[train] best_near_ood_checkpoint_updated epoch={global_epoch} "
+                        f"criterion=near_ood_score_then_balanced_then_train_mean_loss"
+                    ),
+                )
             if (primary_policy_name == "theory" and theory_updated) or (
                 primary_policy_name == "balanced" and balanced_updated
+            ) or (
+                primary_policy_name == "near_ood_balanced" and near_ood_updated
             ):
                 _save_primary_checkpoint_alias(
                     epoch_summary=epoch_summary,
@@ -1543,10 +1828,15 @@ def train_plan_a_model(
                 )
 
     if not best_checkpoint_path.exists():
-        fallback_epoch_summary = best_balanced_epoch_summary if primary_policy_name == "balanced" else best_theory_epoch_summary
-        fallback_validation_summary = (
-            best_balanced_validation_summary if primary_policy_name == "balanced" else best_theory_validation_summary
-        )
+        if primary_policy_name == "balanced":
+            fallback_epoch_summary = best_balanced_epoch_summary
+            fallback_validation_summary = best_balanced_validation_summary
+        elif primary_policy_name == "near_ood_balanced":
+            fallback_epoch_summary = best_near_ood_epoch_summary
+            fallback_validation_summary = best_near_ood_validation_summary
+        else:
+            fallback_epoch_summary = best_theory_epoch_summary
+            fallback_validation_summary = best_theory_validation_summary
         if fallback_epoch_summary is not None:
             _save_primary_checkpoint_alias(
                 epoch_summary=fallback_epoch_summary,
@@ -1579,6 +1869,14 @@ def train_plan_a_model(
                 checkpoint_path=best_balanced_checkpoint_path,
                 epoch_summary=best_balanced_epoch_summary,
                 validation_summary=best_balanced_validation_summary,
+            ),
+            "near_ood_balanced": None
+            if best_near_ood_epoch_summary is None
+            else _selection_payload(
+                policy_name="near_ood_balanced",
+                checkpoint_path=best_near_ood_checkpoint_path,
+                epoch_summary=best_near_ood_epoch_summary,
+                validation_summary=best_near_ood_validation_summary,
             ),
             "last": None
             if last_epoch_summary is None
@@ -1640,10 +1938,18 @@ def train_plan_a_model(
                 "best_policy": primary_policy_name,
                 "best_theory": str(best_theory_checkpoint_path),
                 "best_balanced": str(best_balanced_checkpoint_path),
+                "best_near_ood_balanced": str(best_near_ood_checkpoint_path),
                 "last": str(last_checkpoint_path),
-                "best_epoch": best_balanced_epoch if primary_policy_name == "balanced" else best_theory_epoch,
+                "best_epoch": (
+                    best_balanced_epoch
+                    if primary_policy_name == "balanced"
+                    else best_near_ood_epoch
+                    if primary_policy_name == "near_ood_balanced"
+                    else best_theory_epoch
+                ),
                 "best_theory_epoch": best_theory_epoch,
                 "best_balanced_epoch": best_balanced_epoch,
+                "best_near_ood_balanced_epoch": best_near_ood_epoch,
                 "selection_summary_path": str(checkpoint_selection_summary_path),
                 "selection_policies": selection_policy_config,
             },
@@ -1665,6 +1971,9 @@ def train_plan_a_model(
                     "balanced": "validation_balanced_score_then_pair_auroc_then_train_mean_loss"
                     if validation_history
                     else "train_mean_loss_total",
+                    "near_ood_balanced": "near_ood_score_then_balanced_then_train_mean_loss"
+                    if validation_history
+                    else "train_mean_loss_total",
                 },
                 "primary_checkpoint_policy": primary_policy_name,
                 "resolved_eval_config": {
@@ -1680,14 +1989,27 @@ def train_plan_a_model(
                     "random_state": resolved_eval_config["random_state"],
                 },
                 "best_epoch_metrics": None
-                if (best_balanced_validation_summary if primary_policy_name == "balanced" else best_theory_validation_summary)
+                if (
+                    best_balanced_validation_summary
+                    if primary_policy_name == "balanced"
+                    else best_near_ood_validation_summary
+                    if primary_policy_name == "near_ood_balanced"
+                    else best_theory_validation_summary
+                )
                 is None
                 else (
-                    best_balanced_validation_summary if primary_policy_name == "balanced" else best_theory_validation_summary
+                    best_balanced_validation_summary
+                    if primary_policy_name == "balanced"
+                    else best_near_ood_validation_summary
+                    if primary_policy_name == "near_ood_balanced"
+                    else best_theory_validation_summary
                 ).to_csv_row(),
                 "best_balanced_epoch_metrics": None
                 if best_balanced_validation_summary is None
                 else best_balanced_validation_summary.to_csv_row(),
+                "best_near_ood_balanced_epoch_metrics": None
+                if best_near_ood_validation_summary is None
+                else best_near_ood_validation_summary.to_csv_row(),
             },
             "epochs": [record.to_csv_row() for record in epoch_history],
             "validation_epochs": [record.to_csv_row() for record in validation_history],
@@ -1720,6 +2042,7 @@ def train_plan_a_model(
         "best_policy_name": primary_policy_name,
         "best_theory_checkpoint_path": str(best_theory_checkpoint_path),
         "best_balanced_checkpoint_path": str(best_balanced_checkpoint_path),
+        "best_near_ood_balanced_checkpoint_path": str(best_near_ood_checkpoint_path),
         "checkpoint_selection_summary_path": str(checkpoint_selection_summary_path),
         "last_checkpoint_path": str(last_checkpoint_path),
     }

@@ -3,7 +3,7 @@
 - document_id: req_system_requirements_specification
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-22
+- last_updated: 2026-04-26
 
 ## 1. 范围
 
@@ -101,6 +101,14 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-FN-043`: 系统必须支持 V0.6 multi-source unknown supervision, 至少覆盖 SVHN、DTD、LSUN-resize 与 synthetic noise
 - `REQ-FN-044`: 训练 dataloader 必须支持 source-balanced batch sampling, 防止单一 OOD source 主导 unknown objective
 - `REQ-FN-045`: V0.6 aggregate 必须输出 worst-source AUROC、seen-unseen gap 与 pair-scalar delta
+- `REQ-FN-046`: V0.6B 必须支持可选 GRL source adversary, OOD supervised contrastive loss 与 source-balanced calibration loss
+- `REQ-FN-047`: V0.6B frozen matched benchmark 必须包含 TinyImageNet seen-source OOD slice
+- `REQ-FN-048`: 系统必须支持按 source dataset class label 过滤 OOD manifest source, 至少支持 CIFAR-100 seen `[0,50)` 与 held-out `[50,100)` class split
+- `REQ-FN-049`: V0.6C source-balanced sampler 必须支持 source weights, 并在增加 near-OOD 权重时保持 ID/ambiguous/OOD batch composition
+- `REQ-FN-050`: 系统必须支持 `near_ood_balanced` checkpoint selection policy, 并遵循 `selection_policies.*.checkpoint_name`
+- `REQ-FN-051`: study stage resume 必须由 provenance hash 校验, 默认 stale 输出失败而不是静默复用
+- `REQ-FN-052`: `protocol_controls` 中声明的 source-balanced, class/source holdout, strict frozen final 与 source overlap 规则必须在执行层校验
+- `REQ-FN-053`: aggregate ranking metric 与 required source slices 缺失或为 `NaN` 时必须失败, 不得产出误导性 best/worst seed
 
 ## 4. 非功能需求
 
@@ -121,6 +129,8 @@ FRCNet 是一个面向研究验证的显式未知网络。它的核心目标不�
 - `REQ-SCI-007`: `plan_a_next_v0_2` final test 应达到 easy top-1 `0.60`, hard top-1 `0.45`, ambiguous hit `0.75`; 未达标时必须标记 partial/negative evidence
 - `REQ-SCI-008`: `plan_a_next_v0_5` 不得从 SVHN-only evidence 声称 unseen OOD 泛化; unseen OOD 结论必须来自 final-only CIFAR-100 slice
 - `REQ-SCI-009`: `plan_a_next_v0_6` 以 unseen CIFAR-100 AUROC、worst-source AUROC 与 seen-unseen gap 作为主修复指标
+- `REQ-SCI-010`: `plan_a_next_v0_6b` 必须保持 CIFAR-100 final-only, 并将 TinyImageNet 标记为 seen near-OOD pressure, 不得混称 unseen source evidence
+- `REQ-SCI-011`: `plan_a_next_v0_6c` 只能声明 unseen CIFAR100 classes evidence, 不得声明 unseen CIFAR100 source evidence
 
 ## 6. 关键开放问题
 

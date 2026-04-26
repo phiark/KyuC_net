@@ -20,6 +20,7 @@ def test_model_output_contract_fields_and_invariants():
     assert model_output.content_distribution.shape == (batch_input.batch_size, 10)
     assert model_output.class_mass.shape == (batch_input.batch_size, 10)
     assert model_output.unknown_mass.shape == (batch_input.batch_size,)
+    assert model_output.source_logits is None
 
     torch.testing.assert_close(
         model_output.class_mass.sum(dim=1) + model_output.unknown_mass,
@@ -35,6 +36,20 @@ def test_model_output_contract_fields_and_invariants():
     )
 
 
+def test_source_adversary_output_is_optional():
+    batch_input = build_synthetic_batch()
+    model = FRCNetModel(
+        num_classes=10,
+        source_adversary_enabled=True,
+        num_source_domains=7,
+    )
+
+    model_output = model(batch_input.image)
+
+    assert model_output.source_logits is not None
+    assert model_output.source_logits.shape == (batch_input.batch_size, 7)
+
+
 def test_scoring_helpers_are_stable_on_model_output():
     batch_input = build_synthetic_batch()
     model = FRCNetModel(num_classes=10)
@@ -47,4 +62,3 @@ def test_scoring_helpers_are_stable_on_model_output():
     assert score.shape == (batch_input.batch_size,)
     assert torch.isfinite(entropy).all()
     assert torch.isfinite(score).all()
-

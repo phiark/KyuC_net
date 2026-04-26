@@ -14,6 +14,7 @@ class ModelOutput:
     content_distribution: torch.Tensor
     class_mass: torch.Tensor
     unknown_mass: torch.Tensor
+    source_logits: torch.Tensor | None = None
 
     @property
     def batch_size(self) -> int:
@@ -22,4 +23,3 @@ class ModelOutput:
     @property
     def num_classes(self) -> int:
         return int(self.class_mass.shape[1])
-

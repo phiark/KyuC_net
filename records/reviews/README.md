@@ -13,3 +13,6 @@ Current records:
 - `2026-04-25_review_v0_4_strict_freeze_scope_control.md`
 - `2026-04-25_review_v0_4_strict_freeze_local_proof.md`
 - `2026-04-26_review_v0_5_evidence_repair_scope.md`
+- `2026-04-26_review_v0_6_multisource_loso_scope.md`
+- `2026-04-26_review_v0_6b_source_invariant_scope.md`
+- `2026-04-26_review_v0_6c_near_ood_split_repair_scope.md`

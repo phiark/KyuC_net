@@ -13,15 +13,22 @@ from typing import Any, Callable, Mapping, Sequence
 import matplotlib.pyplot as plt
 import yaml
 
+from frcnet.data import read_manifest_jsonl
 from frcnet.evaluation import read_top1_proposition_records
 from frcnet.workflows.plan_a import (
     _load_yaml_section,
     _write_json,
     build_plan_a_manifest_bundle,
+    enforce_zero_source_overlap,
     export_plan_a_inference_bundle,
     generate_plan_a_artifact_bundle,
     prepare_plan_a_datasets,
     train_plan_a_model,
+)
+from frcnet.workflows.provenance import (
+    build_stage_provenance,
+    validate_stage_provenance,
+    write_stage_provenance,
 )
 
 
@@ -43,11 +50,16 @@ class StudyRunMetric:
     seen_ood_dtd_pair_auroc: float = math.nan
     seen_ood_lsun_resize_pair_auroc: float = math.nan
     seen_ood_gaussian_noise_pair_auroc: float = math.nan
+    seen_ood_tiny_imagenet_pair_auroc: float = math.nan
+    seen_ood_cifar100_seen_classes_pair_auroc: float = math.nan
+    seen_near_ood_pair_auroc: float = math.nan
     unseen_ood_pair_auroc: float = math.nan
     unseen_ood_cifar100_pair_auroc: float = math.nan
+    unseen_ood_cifar100_heldout_classes_pair_auroc: float = math.nan
     all_ood_pair_auroc: float = math.nan
     worst_source_pair_auroc: float = math.nan
     seen_unseen_gap: float = math.nan
+    near_ood_seen_unseen_gap: float = math.nan
     pair_scalar_delta: float = math.nan
 
     def to_csv_row(self) -> dict[str, str | int | float]:
@@ -67,11 +79,16 @@ class StudyRunMetric:
             "seen_ood_dtd_pair_auroc": self.seen_ood_dtd_pair_auroc,
             "seen_ood_lsun_resize_pair_auroc": self.seen_ood_lsun_resize_pair_auroc,
             "seen_ood_gaussian_noise_pair_auroc": self.seen_ood_gaussian_noise_pair_auroc,
+            "seen_ood_tiny_imagenet_pair_auroc": self.seen_ood_tiny_imagenet_pair_auroc,
+            "seen_ood_cifar100_seen_classes_pair_auroc": self.seen_ood_cifar100_seen_classes_pair_auroc,
+            "seen_near_ood_pair_auroc": self.seen_near_ood_pair_auroc,
             "unseen_ood_pair_auroc": self.unseen_ood_pair_auroc,
             "unseen_ood_cifar100_pair_auroc": self.unseen_ood_cifar100_pair_auroc,
+            "unseen_ood_cifar100_heldout_classes_pair_auroc": self.unseen_ood_cifar100_heldout_classes_pair_auroc,
             "all_ood_pair_auroc": self.all_ood_pair_auroc,
             "worst_source_pair_auroc": self.worst_source_pair_auroc,
             "seen_unseen_gap": self.seen_unseen_gap,
+            "near_ood_seen_unseen_gap": self.near_ood_seen_unseen_gap,
             "pair_scalar_delta": self.pair_scalar_delta,
             "run_output_dir": self.run_output_dir,
         }
@@ -96,11 +113,16 @@ class CheckpointPolicyMetric:
     seen_ood_dtd_pair_auroc: float = math.nan
     seen_ood_lsun_resize_pair_auroc: float = math.nan
     seen_ood_gaussian_noise_pair_auroc: float = math.nan
+    seen_ood_tiny_imagenet_pair_auroc: float = math.nan
+    seen_ood_cifar100_seen_classes_pair_auroc: float = math.nan
+    seen_near_ood_pair_auroc: float = math.nan
     unseen_ood_pair_auroc: float = math.nan
     unseen_ood_cifar100_pair_auroc: float = math.nan
+    unseen_ood_cifar100_heldout_classes_pair_auroc: float = math.nan
     all_ood_pair_auroc: float = math.nan
     worst_source_pair_auroc: float = math.nan
     seen_unseen_gap: float = math.nan
+    near_ood_seen_unseen_gap: float = math.nan
     pair_scalar_delta: float = math.nan
 
     def to_csv_row(self) -> dict[str, str | int | float]:
@@ -121,11 +143,16 @@ class CheckpointPolicyMetric:
             "seen_ood_dtd_pair_auroc": self.seen_ood_dtd_pair_auroc,
             "seen_ood_lsun_resize_pair_auroc": self.seen_ood_lsun_resize_pair_auroc,
             "seen_ood_gaussian_noise_pair_auroc": self.seen_ood_gaussian_noise_pair_auroc,
+            "seen_ood_tiny_imagenet_pair_auroc": self.seen_ood_tiny_imagenet_pair_auroc,
+            "seen_ood_cifar100_seen_classes_pair_auroc": self.seen_ood_cifar100_seen_classes_pair_auroc,
+            "seen_near_ood_pair_auroc": self.seen_near_ood_pair_auroc,
             "unseen_ood_pair_auroc": self.unseen_ood_pair_auroc,
             "unseen_ood_cifar100_pair_auroc": self.unseen_ood_cifar100_pair_auroc,
+            "unseen_ood_cifar100_heldout_classes_pair_auroc": self.unseen_ood_cifar100_heldout_classes_pair_auroc,
             "all_ood_pair_auroc": self.all_ood_pair_auroc,
             "worst_source_pair_auroc": self.worst_source_pair_auroc,
             "seen_unseen_gap": self.seen_unseen_gap,
+            "near_ood_seen_unseen_gap": self.near_ood_seen_unseen_gap,
             "pair_scalar_delta": self.pair_scalar_delta,
             "run_output_dir": self.run_output_dir,
         }
@@ -143,11 +170,16 @@ AGGREGATE_METRIC_NAMES = (
     "seen_ood_dtd_pair_auroc",
     "seen_ood_lsun_resize_pair_auroc",
     "seen_ood_gaussian_noise_pair_auroc",
+    "seen_ood_tiny_imagenet_pair_auroc",
+    "seen_ood_cifar100_seen_classes_pair_auroc",
+    "seen_near_ood_pair_auroc",
     "unseen_ood_pair_auroc",
     "unseen_ood_cifar100_pair_auroc",
+    "unseen_ood_cifar100_heldout_classes_pair_auroc",
     "all_ood_pair_auroc",
     "worst_source_pair_auroc",
     "seen_unseen_gap",
+    "near_ood_seen_unseen_gap",
     "pair_scalar_delta",
 )
 
@@ -174,6 +206,173 @@ def _load_json_file(input_path: str | Path) -> dict[str, Any]:
     return json.loads(Path(input_path).read_text(encoding="utf-8"))
 
 
+def _yaml_snapshot_matches(
+    snapshot_path: str | Path,
+    expected_config_path: str | Path | None,
+    section_name: str,
+) -> bool:
+    if expected_config_path is None:
+        return True
+    snapshot = Path(snapshot_path)
+    expected = Path(expected_config_path)
+    if not snapshot.exists() or not expected.exists():
+        return False
+    return _load_yaml_section(snapshot, section_name) == _load_yaml_section(expected, section_name)
+
+
+def _eval_requires_matched_manifest(eval_config_path: str | Path) -> bool:
+    eval_config = _load_yaml_section(eval_config_path, "eval")
+    benchmark_slices = [dict(value) for value in eval_config.get("benchmark_slices", [])]
+    return bool(eval_config.get("require_matched_manifest", False)) or any(
+        bool(value.get("require_matched_manifest", False)) for value in benchmark_slices
+    )
+
+
+def _train_uses_source_balanced_sampling(train_config_path: str | Path) -> bool:
+    train_config = _load_yaml_section(train_config_path, "train")
+    if bool(train_config.get("dataloader", {}).get("source_balanced_sampling", False)):
+        return True
+    phase_configs = train_config.get("training", {}).get("phases", [])
+    return any(bool(dict(phase).get("dataloader", {}).get("source_balanced_sampling", False)) for phase in phase_configs)
+
+
+def _validate_source_name_in_protocol(
+    protocol_config: Mapping[str, Any],
+    source_name: str,
+    *,
+    should_exist: bool,
+    protocol_label: str,
+) -> None:
+    dataset_names = set(dict(protocol_config.get("datasets", {})))
+    if should_exist and source_name not in dataset_names:
+        raise ValueError(f"protocol_controls source `{source_name}` is missing from {protocol_label} protocol datasets.")
+    if not should_exist and source_name in dataset_names:
+        raise ValueError(f"protocol_controls source `{source_name}` must not appear in {protocol_label} protocol datasets.")
+
+
+def _source_entries(protocol_config: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [dict(value) for value in protocol_config.get("unknown_sources", [])] + [
+        dict(value) for value in protocol_config.get("ood_sources", [])
+    ]
+
+
+def _source_entry_names(protocol_config: Mapping[str, Any]) -> set[str]:
+    return {str(entry.get("dataset_name", entry.get("name", ""))) for entry in _source_entries(protocol_config)}
+
+
+def _has_cifar100_class_range(
+    protocol_config: Mapping[str, Any],
+    *,
+    start: int,
+    stop: int,
+    source_role: str | None = None,
+) -> bool:
+    for entry in _source_entries(protocol_config):
+        if str(entry.get("dataset_name", entry.get("name", ""))) != "cifar100":
+            continue
+        if source_role is not None and str(entry.get("source_role", "")) != source_role:
+            continue
+        if int(entry.get("class_label_start", -1)) == start and int(entry.get("class_label_stop", -1)) == stop:
+            return True
+    return False
+
+
+def _validate_protocol_controls(
+    *,
+    protocol_controls: Mapping[str, Any],
+    train_protocol_config_path: str | Path,
+    validation_protocol_config_path: str | Path,
+    final_test_protocol_config_path: str | Path,
+    train_config_path: str | Path,
+    eval_config_path: str | Path,
+    reference_config_path: str | Path | None,
+) -> None:
+    allowed_controls = {
+        "source_balanced_sampling",
+        "leave_one_source_out",
+        "near_ood_training_source",
+        "near_ood_training_sources",
+        "require_source_overlap_zero",
+        "require_strict_frozen_final",
+        "protocol_variant",
+    }
+    unknown_controls = sorted(set(protocol_controls) - allowed_controls)
+    if unknown_controls:
+        raise ValueError(f"Unsupported study.protocol_controls keys: {', '.join(unknown_controls)}")
+
+    if bool(protocol_controls.get("source_balanced_sampling", False)) and not _train_uses_source_balanced_sampling(
+        train_config_path
+    ):
+        raise ValueError(
+            "study.protocol_controls.source_balanced_sampling=true requires train.dataloader.source_balanced_sampling "
+            "or a phase dataloader override to enable it."
+        )
+
+    if bool(protocol_controls.get("require_strict_frozen_final", False)):
+        if not _eval_requires_matched_manifest(eval_config_path):
+            raise ValueError(
+                "study.protocol_controls.require_strict_frozen_final=true requires eval.require_matched_manifest=true "
+                "or at least one strict benchmark slice."
+            )
+        if reference_config_path is None:
+            raise ValueError("study.reference_config is required when require_strict_frozen_final=true.")
+
+    train_protocol = _load_yaml_section(train_protocol_config_path, "protocol")
+    validation_protocol = _load_yaml_section(validation_protocol_config_path, "protocol")
+    final_test_protocol = _load_yaml_section(final_test_protocol_config_path, "protocol")
+
+    holdout_source = protocol_controls.get("leave_one_source_out")
+    if holdout_source:
+        source_name = str(holdout_source)
+        if str(protocol_controls.get("protocol_variant", "")) == "cifar100_class_holdout" and source_name == "cifar100":
+            raise ValueError(
+                "V0.6C protocol_variant=cifar100_class_holdout must not declare leave_one_source_out=cifar100; "
+                "the claim is unseen CIFAR100 classes, not unseen CIFAR100 source."
+            )
+        _validate_source_name_in_protocol(train_protocol, source_name, should_exist=False, protocol_label="train")
+        _validate_source_name_in_protocol(validation_protocol, source_name, should_exist=False, protocol_label="validation")
+        _validate_source_name_in_protocol(final_test_protocol, source_name, should_exist=True, protocol_label="final_test")
+        source_role = str(dict(final_test_protocol.get("source_roles", {})).get(source_name, ""))
+        if source_role != "unseen_ood_source":
+            raise ValueError(
+                "study.protocol_controls.leave_one_source_out requires the held-out source to be marked "
+                f"`unseen_ood_source` in the final-test protocol; got `{source_role}` for `{source_name}`."
+            )
+
+    near_ood_sources = []
+    if protocol_controls.get("near_ood_training_source"):
+        near_ood_sources.append(str(protocol_controls["near_ood_training_source"]))
+    near_ood_sources.extend(str(value) for value in protocol_controls.get("near_ood_training_sources", []))
+    for source_name in near_ood_sources:
+        _validate_source_name_in_protocol(train_protocol, source_name, should_exist=True, protocol_label="train")
+        _validate_source_name_in_protocol(validation_protocol, source_name, should_exist=True, protocol_label="validation")
+        _validate_source_name_in_protocol(final_test_protocol, source_name, should_exist=True, protocol_label="final_test")
+        source_role = str(dict(final_test_protocol.get("source_roles", {})).get(source_name, ""))
+        if source_role == "unseen_ood_source":
+            raise ValueError(
+                "study.protocol_controls.near_ood_training_source must not be marked `unseen_ood_source` "
+                f"in the final-test protocol; got `{source_name}`."
+            )
+
+    protocol_variant = str(protocol_controls.get("protocol_variant", ""))
+    if protocol_variant == "cifar100_class_holdout":
+        if "cifar100" not in _source_entry_names(train_protocol):
+            raise ValueError("cifar100_class_holdout requires CIFAR100 seen classes in train unknown/OOD sources.")
+        if "cifar100" not in _source_entry_names(validation_protocol):
+            raise ValueError("cifar100_class_holdout requires CIFAR100 seen classes in validation unknown/OOD sources.")
+        if not _has_cifar100_class_range(train_protocol, start=0, stop=50):
+            raise ValueError("V0.6C train protocol must use CIFAR100 seen classes [0,50).")
+        if not _has_cifar100_class_range(validation_protocol, start=0, stop=50):
+            raise ValueError("V0.6C validation protocol must use CIFAR100 seen classes [0,50).")
+        if not _has_cifar100_class_range(
+            final_test_protocol,
+            start=50,
+            stop=100,
+            source_role="unseen_ood_classes",
+        ):
+            raise ValueError("V0.6C final protocol must include CIFAR100 held-out classes [50,100).")
+
+
 def _override_train_seed(train_config_path: str | Path, seed: int, output_path: str | Path) -> Path:
     train_config = _load_yaml_section(train_config_path, "train")
     training_config = dict(train_config.get("training", {}))
@@ -182,10 +381,42 @@ def _override_train_seed(train_config_path: str | Path, seed: int, output_path: 
     return _write_yaml_section(output_path, "train", train_config)
 
 
-def _load_existing_train_outputs(run_root: str | Path, run_id: str) -> dict[str, str] | None:
+def _load_existing_train_outputs(
+    run_root: str | Path,
+    run_id: str,
+    *,
+    expected_provenance: Mapping[str, Any],
+    resume_policy: str,
+    protocol_config_path: str | Path,
+    model_config_path: str | Path,
+    train_config_path: str | Path,
+    validation_protocol_config_path: str | Path | None,
+    eval_config_path: str | Path | None,
+) -> dict[str, str] | None:
     training_root = Path(run_root) / "training"
     summary_path = training_root / "records" / "train_summary.json"
     if not summary_path.exists():
+        return None
+    if not validate_stage_provenance(
+        training_root,
+        expected_provenance,
+        resume_policy=resume_policy,
+        stage_label=f"{run_id}/training",
+    ):
+        return None
+
+    snapshots_root = training_root / "snapshots"
+    if not (
+        _yaml_snapshot_matches(snapshots_root / "protocol_config_snapshot.yaml", protocol_config_path, "protocol")
+        and _yaml_snapshot_matches(snapshots_root / "model_config_snapshot.yaml", model_config_path, "model")
+        and _yaml_snapshot_matches(snapshots_root / "train_config_snapshot.yaml", train_config_path, "train")
+        and _yaml_snapshot_matches(
+            snapshots_root / "validation_protocol_config_snapshot.yaml",
+            validation_protocol_config_path,
+            "protocol",
+        )
+        and _yaml_snapshot_matches(snapshots_root / "eval_config_snapshot.yaml", eval_config_path, "eval")
+    ):
         return None
 
     summary_payload = _load_json_file(summary_path)
@@ -223,6 +454,7 @@ def _load_existing_train_outputs(run_root: str | Path, run_id: str) -> dict[str,
         "best_policy_name": best_policy_name,
         "best_theory_checkpoint_path": str(checkpoints.get("best_theory", "")),
         "best_balanced_checkpoint_path": str(checkpoints.get("best_balanced", "")),
+        "best_near_ood_balanced_checkpoint_path": str(checkpoints.get("best_near_ood_balanced", "")),
         "checkpoint_selection_summary_path": str(checkpoints.get("selection_summary_path", "")),
         "last_checkpoint_path": "" if not last_checkpoint_path else str(last_checkpoint_path),
     }
@@ -231,6 +463,12 @@ def _load_existing_train_outputs(run_root: str | Path, run_id: str) -> dict[str,
 def _load_existing_inference_outputs(
     run_root: str | Path,
     run_id: str,
+    *,
+    expected_provenance: Mapping[str, Any],
+    resume_policy: str,
+    protocol_config_path: str | Path,
+    model_config_path: str | Path,
+    checkpoint_path: str | Path,
     subdir_name: str = "analysis",
 ) -> dict[str, str] | None:
     analysis_root = Path(run_root) / subdir_name
@@ -251,9 +489,24 @@ def _load_existing_inference_outputs(
     )
     if not all(path.exists() for path in required_paths):
         return None
+    if not validate_stage_provenance(
+        analysis_root,
+        expected_provenance,
+        resume_policy=resume_policy,
+        stage_label=f"{run_id}/{subdir_name}",
+    ):
+        return None
+    if not (
+        _yaml_snapshot_matches(protocol_snapshot_path, protocol_config_path, "protocol")
+        and _yaml_snapshot_matches(model_snapshot_path, model_config_path, "model")
+    ):
+        return None
 
     protocol_id = str(_load_yaml_section(protocol_snapshot_path, "protocol").get("protocol_id", ""))
     analysis_summary_payload = _load_json_file(analysis_summary_path)
+    stored_checkpoint_path = analysis_summary_payload.get("checkpoint_path")
+    if stored_checkpoint_path is None or Path(str(stored_checkpoint_path)).resolve() != Path(checkpoint_path).resolve():
+        return None
     return {
         "run_id": run_id,
         "model_family": str(analysis_summary_payload.get("model_family", "frcnet_explicit_unknown")),
@@ -274,6 +527,11 @@ def _load_existing_inference_outputs(
 def _load_existing_artifact_outputs(
     run_root: str | Path,
     run_id: str,
+    *,
+    expected_provenance: Mapping[str, Any],
+    resume_policy: str,
+    protocol_config_path: str | Path,
+    eval_config_path: str | Path,
     analysis_config_path: str | Path | None = None,
     subdir_name: str = "report",
 ) -> dict[str, str] | None:
@@ -287,6 +545,7 @@ def _load_existing_artifact_outputs(
     experiment_record_path = report_root / "experiment_record.md"
     protocol_snapshot_path = report_root / "protocol_config_snapshot.yaml"
     eval_snapshot_path = report_root / "eval_config_snapshot.yaml"
+    analysis_config_snapshot_path = report_root / "analysis_config_snapshot.yaml"
     analysis_summary_path = report_root / "analysis_summary.json"
 
     required_paths = (
@@ -298,6 +557,19 @@ def _load_existing_artifact_outputs(
         analysis_summary_path,
     )
     if not all(path.exists() for path in required_paths):
+        return None
+    if not validate_stage_provenance(
+        report_root,
+        expected_provenance,
+        resume_policy=resume_policy,
+        stage_label=f"{run_id}/{subdir_name}",
+    ):
+        return None
+    if not (
+        _yaml_snapshot_matches(protocol_snapshot_path, protocol_config_path, "protocol")
+        and _yaml_snapshot_matches(eval_snapshot_path, eval_config_path, "eval")
+        and _yaml_snapshot_matches(analysis_config_snapshot_path, analysis_config_path, "analysis")
+    ):
         return None
 
     matched_row = _single_csv_row(matched_path)
@@ -332,6 +604,8 @@ def _checkpoint_path_for_policy(train_output: Mapping[str, Any], policy_name: st
         return str(train_output.get("best_theory_checkpoint_path", ""))
     if policy_name == "balanced":
         return str(train_output.get("best_balanced_checkpoint_path", ""))
+    if policy_name == "near_ood_balanced":
+        return str(train_output.get("best_near_ood_balanced_checkpoint_path", ""))
     if policy_name == "last":
         return str(train_output.get("last_checkpoint_path", ""))
     return ""
@@ -470,7 +744,13 @@ def _prepare_training_eval_config(eval_config: str | Path, output_path: str | Pa
 
     eval_payload["matched_manifest_path"] = ""
     eval_payload["require_matched_manifest"] = False
-    eval_payload["benchmark_slices"] = []
+    if bool(eval_payload.get("preserve_benchmark_slices_for_validation", False)):
+        for benchmark_slice in benchmark_slices:
+            benchmark_slice["matched_manifest_path"] = ""
+            benchmark_slice["require_matched_manifest"] = False
+        eval_payload["benchmark_slices"] = benchmark_slices
+    else:
+        eval_payload["benchmark_slices"] = []
     return _write_yaml_section(output_path, "eval", eval_payload)
 
 
@@ -550,12 +830,28 @@ def _collect_run_metric(study_id: str, seed: int, run_output: Mapping[str, Any])
         run_output["report"],
         "ambiguous_vs_seen_ood_gaussian_noise_matched_table",
     )
-    unseen_cifar100 = _optional_pair_auroc(
+    seen_tiny = _optional_pair_auroc(
+        run_output["report"],
+        "ambiguous_vs_seen_ood_tiny_imagenet_matched_table",
+    )
+    seen_cifar100 = _optional_pair_auroc(
+        run_output["report"],
+        "ambiguous_vs_seen_ood_cifar100_seen_classes_matched_table",
+    )
+    unseen_cifar100_legacy = _optional_pair_auroc(
         run_output["report"],
         "ambiguous_vs_unseen_ood_cifar100_matched_table",
     )
-    seen_mean = _mean_non_nan((seen_svhn, seen_dtd, seen_lsun, seen_noise))
-    source_values = (seen_svhn, seen_dtd, seen_lsun, seen_noise, unseen_cifar100)
+    unseen_cifar100_heldout = _optional_pair_auroc(
+        run_output["report"],
+        "ambiguous_vs_unseen_ood_cifar100_heldout_classes_matched_table",
+    )
+    unseen_cifar100 = (
+        unseen_cifar100_heldout if not math.isnan(unseen_cifar100_heldout) else unseen_cifar100_legacy
+    )
+    seen_mean = _mean_non_nan((seen_svhn, seen_dtd, seen_lsun, seen_noise, seen_tiny, seen_cifar100))
+    seen_near = _mean_non_nan((seen_tiny, seen_cifar100))
+    source_values = (seen_svhn, seen_dtd, seen_lsun, seen_noise, seen_tiny, seen_cifar100, unseen_cifar100)
     pair_auroc = float(matched_row["pair_auroc"])
     scalar_auroc = float(matched_row["scalar_auroc"])
     return StudyRunMetric(
@@ -575,11 +871,18 @@ def _collect_run_metric(study_id: str, seed: int, run_output: Mapping[str, Any])
         seen_ood_dtd_pair_auroc=seen_dtd,
         seen_ood_lsun_resize_pair_auroc=seen_lsun,
         seen_ood_gaussian_noise_pair_auroc=seen_noise,
+        seen_ood_tiny_imagenet_pair_auroc=seen_tiny,
+        seen_ood_cifar100_seen_classes_pair_auroc=seen_cifar100,
+        seen_near_ood_pair_auroc=seen_near,
         unseen_ood_pair_auroc=unseen_cifar100,
         unseen_ood_cifar100_pair_auroc=unseen_cifar100,
+        unseen_ood_cifar100_heldout_classes_pair_auroc=unseen_cifar100_heldout,
         all_ood_pair_auroc=_optional_pair_auroc(run_output["report"], "ambiguous_vs_all_ood_matched_table"),
         worst_source_pair_auroc=_min_non_nan(source_values),
         seen_unseen_gap=math.nan if math.isnan(seen_mean) or math.isnan(unseen_cifar100) else seen_mean - unseen_cifar100,
+        near_ood_seen_unseen_gap=math.nan
+        if math.isnan(seen_near) or math.isnan(unseen_cifar100)
+        else seen_near - unseen_cifar100,
         pair_scalar_delta=pair_auroc - scalar_auroc,
     )
 
@@ -602,10 +905,20 @@ def _collect_policy_metric(
         _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_dtd_matched_table"),
         _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_lsun_resize_matched_table"),
         _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_gaussian_noise_matched_table"),
+        _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_tiny_imagenet_matched_table"),
+        _optional_pair_auroc(report_output, "ambiguous_vs_seen_ood_cifar100_seen_classes_matched_table"),
     )
-    seen_svhn, seen_dtd, seen_lsun, seen_noise = seen_values
-    unseen_cifar100 = _optional_pair_auroc(report_output, "ambiguous_vs_unseen_ood_cifar100_matched_table")
+    seen_svhn, seen_dtd, seen_lsun, seen_noise, seen_tiny, seen_cifar100 = seen_values
+    unseen_cifar100_legacy = _optional_pair_auroc(report_output, "ambiguous_vs_unseen_ood_cifar100_matched_table")
+    unseen_cifar100_heldout = _optional_pair_auroc(
+        report_output,
+        "ambiguous_vs_unseen_ood_cifar100_heldout_classes_matched_table",
+    )
+    unseen_cifar100 = (
+        unseen_cifar100_heldout if not math.isnan(unseen_cifar100_heldout) else unseen_cifar100_legacy
+    )
     seen_mean = _mean_non_nan(seen_values)
+    seen_near = _mean_non_nan((seen_tiny, seen_cifar100))
     pair_auroc = float(matched_row["pair_auroc"])
     scalar_auroc = float(matched_row["scalar_auroc"])
     return CheckpointPolicyMetric(
@@ -626,11 +939,18 @@ def _collect_policy_metric(
         seen_ood_dtd_pair_auroc=seen_dtd,
         seen_ood_lsun_resize_pair_auroc=seen_lsun,
         seen_ood_gaussian_noise_pair_auroc=seen_noise,
+        seen_ood_tiny_imagenet_pair_auroc=seen_tiny,
+        seen_ood_cifar100_seen_classes_pair_auroc=seen_cifar100,
+        seen_near_ood_pair_auroc=seen_near,
         unseen_ood_pair_auroc=unseen_cifar100,
         unseen_ood_cifar100_pair_auroc=unseen_cifar100,
+        unseen_ood_cifar100_heldout_classes_pair_auroc=unseen_cifar100_heldout,
         all_ood_pair_auroc=_optional_pair_auroc(report_output, "ambiguous_vs_all_ood_matched_table"),
         worst_source_pair_auroc=_min_non_nan((*seen_values, unseen_cifar100)),
         seen_unseen_gap=math.nan if math.isnan(seen_mean) or math.isnan(unseen_cifar100) else seen_mean - unseen_cifar100,
+        near_ood_seen_unseen_gap=math.nan
+        if math.isnan(seen_near) or math.isnan(unseen_cifar100)
+        else seen_near - unseen_cifar100,
         pair_scalar_delta=pair_auroc - scalar_auroc,
     )
 
@@ -812,6 +1132,29 @@ def _write_checkpoint_policy_gap_summary(
     return output
 
 
+def _validate_required_source_slices(
+    *,
+    rows: Sequence[Mapping[str, str | int | float]],
+    required_benchmark_slices: Sequence[str],
+    seeds: Sequence[int],
+) -> None:
+    if not required_benchmark_slices:
+        return
+    available = {
+        (int(row["seed"]), str(row["benchmark_name"]))
+        for row in rows
+        if "seed" in row and "benchmark_name" in row
+    }
+    missing = [
+        f"seed{seed:03d}:{benchmark_name}"
+        for seed in seeds
+        for benchmark_name in required_benchmark_slices
+        if (int(seed), str(benchmark_name)) not in available
+    ]
+    if missing:
+        raise ValueError(f"Required benchmark slices are missing: {', '.join(missing)}")
+
+
 def _write_metric_plot(
     metrics: Sequence[StudyRunMetric],
     *,
@@ -876,6 +1219,18 @@ def aggregate_plan_a_study_bundle(
                 run_output=run_output,
             )
         )
+    required_benchmark_slices = tuple(
+        str(value)
+        for value in study_config.get(
+            "required_benchmark_slices",
+            study_config.get("report_policy", {}).get("required_benchmark_slices", ()),
+        )
+    )
+    _validate_required_source_slices(
+        rows=source_slice_rows,
+        required_benchmark_slices=required_benchmark_slices,
+        seeds=seeds,
+    )
     policy_metrics: list[CheckpointPolicyMetric] = []
     for seed, run_output in zip(seeds, run_outputs, strict=True):
         policy_outputs = dict(run_output.get("policy_outputs", {}))
@@ -917,14 +1272,25 @@ def aggregate_plan_a_study_bundle(
         policy_metrics,
         output_root / "checkpoint_policy_summary.csv",
     )
+    report_policy = dict(study_config.get("report_policy", {}))
     checkpoint_policy_gap_summary_path = _write_checkpoint_policy_gap_summary(
         policy_metrics,
         output_root / "checkpoint_policy_gap_summary.csv",
-        minuend_policy="balanced",
-        subtrahend_policy="theory",
+        minuend_policy=str(report_policy.get("gap_minuend_policy", "balanced")),
+        subtrahend_policy=str(report_policy.get("gap_subtrahend_policy", "theory")),
     )
 
-    ranking_metric = str(study_config.get("report_policy", {}).get("ranking_metric", "pair_auroc"))
+    ranking_metric = str(report_policy.get("ranking_metric", "pair_auroc"))
+    if not hasattr(metrics[0], ranking_metric):
+        raise ValueError(f"Unsupported study report_policy.ranking_metric: `{ranking_metric}`.")
+    missing_ranking_runs = [
+        metric.run_id for metric in metrics if math.isnan(float(getattr(metric, ranking_metric)))
+    ]
+    if missing_ranking_runs:
+        raise ValueError(
+            f"Study ranking metric `{ranking_metric}` is missing or NaN for runs: "
+            f"{', '.join(missing_ranking_runs)}"
+        )
     ranked_metrics = sorted(metrics, key=lambda metric: float(getattr(metric, ranking_metric)), reverse=True)
     best_metric = ranked_metrics[0]
     worst_metric = ranked_metrics[-1]
@@ -1057,6 +1423,7 @@ def run_plan_a_study_bundle(
     reference_config = study_config.get("reference_config")
     seeds = [int(seed) for seed in study_config.get("seeds", (7, 17, 27))]
     model_family = str(study_config.get("model_family", "frcnet_explicit_unknown"))
+    resume_policy = str(study_config.get("resume_policy", "fail_on_stale"))
     report_policy = dict(study_config.get("report_policy", {}))
     primary_checkpoint_policy = str(report_policy.get("primary_checkpoint_policy", "theory"))
     companion_checkpoint_policies = [
@@ -1068,6 +1435,16 @@ def run_plan_a_study_bundle(
             eval_config,
             study_root / "shared" / "generated_configs" / "eval_validation_selection.yaml",
         )
+    protocol_controls = dict(study_config.get("protocol_controls", {}))
+    _validate_protocol_controls(
+        protocol_controls=protocol_controls,
+        train_protocol_config_path=train_protocol_config,
+        validation_protocol_config_path=validation_protocol_config,
+        final_test_protocol_config_path=final_test_protocol_config,
+        train_config_path=train_config,
+        eval_config_path=eval_config,
+        reference_config_path=reference_config,
+    )
 
     prepare_plan_a_datasets(
         list(dict.fromkeys([train_protocol_config, validation_protocol_config, final_test_protocol_config])),
@@ -1090,6 +1467,16 @@ def run_plan_a_study_bundle(
         summary_filename="plan_a_manifest_summary.json",
     )
     _emit_progress(progress_callback, f"[study] shared_final_test_manifest={final_manifest_outputs['manifest_path']}")
+    require_source_overlap_zero = bool(protocol_controls.get("require_source_overlap_zero", False))
+    validation_manifest_records = read_manifest_jsonl(validation_manifest_outputs["manifest_path"])
+    final_manifest_records = read_manifest_jsonl(final_manifest_outputs["manifest_path"])
+    if require_source_overlap_zero:
+        enforce_zero_source_overlap(
+            {
+                "validation": validation_manifest_records,
+                "final_test": final_manifest_records,
+            }
+        )
 
     run_outputs: list[dict[str, Any]] = []
     for seed in seeds:
@@ -1101,7 +1488,34 @@ def run_plan_a_study_bundle(
             seed,
             study_root / "shared" / "generated_configs" / f"train_seed{seed:03d}.yaml",
         )
-        train_outputs = _load_existing_train_outputs(run_root, run_id)
+        training_provenance = build_stage_provenance(
+            stage_name="training",
+            input_files=(
+                study_config_path,
+                train_protocol_config,
+                validation_protocol_config,
+                model_config,
+                generated_train_config_path,
+                training_eval_config,
+            ),
+            input_values={
+                "run_id": run_id,
+                "seed": seed,
+                "primary_checkpoint_policy": primary_checkpoint_policy,
+            },
+        )
+        train_outputs = _load_existing_train_outputs(
+            run_root,
+            run_id,
+            expected_provenance=training_provenance,
+            resume_policy=resume_policy,
+            protocol_config_path=train_protocol_config,
+            model_config_path=model_config,
+            train_config_path=generated_train_config_path,
+            validation_protocol_config_path=validation_protocol_config,
+            eval_config_path=training_eval_config,
+        )
+        training_resumed = train_outputs is not None
         if train_outputs is None:
             train_outputs = train_plan_a_model(
                 protocol_config_path=train_protocol_config,
@@ -1114,10 +1528,20 @@ def run_plan_a_study_bundle(
                 eval_config_path=training_eval_config,
                 progress_callback=progress_callback,
             )
+            write_stage_provenance(run_root / "training", training_provenance)
         else:
             _emit_progress(
                 progress_callback,
                 f"[study] seed_resume_training run_id={run_id} best_checkpoint={train_outputs['best_checkpoint_path']}",
+            )
+        if require_source_overlap_zero:
+            train_manifest_records = read_manifest_jsonl(train_outputs["manifest_path"])
+            enforce_zero_source_overlap(
+                {
+                    "train": train_manifest_records,
+                    "validation": validation_manifest_records,
+                    "final_test": final_manifest_records,
+                }
             )
 
         primary_checkpoint_path = _checkpoint_path_for_policy(train_outputs, primary_checkpoint_policy)
@@ -1126,7 +1550,34 @@ def run_plan_a_study_bundle(
                 f"Primary checkpoint policy `{primary_checkpoint_policy}` did not resolve to an existing checkpoint for {run_id}."
             )
 
-        inference_outputs = _load_existing_inference_outputs(run_root, run_id, "analysis")
+        analysis_provenance = build_stage_provenance(
+            stage_name="analysis",
+            input_files=(
+                final_test_protocol_config,
+                model_config,
+                final_manifest_outputs["manifest_path"],
+                primary_checkpoint_path,
+            ),
+            input_values={
+                "run_id": run_id,
+                "checkpoint_policy": primary_checkpoint_policy,
+            },
+        )
+        inference_outputs = (
+            _load_existing_inference_outputs(
+                run_root,
+                run_id,
+                expected_provenance=analysis_provenance,
+                resume_policy=resume_policy,
+                protocol_config_path=final_test_protocol_config,
+                model_config_path=model_config,
+                checkpoint_path=primary_checkpoint_path,
+                subdir_name="analysis",
+            )
+            if training_resumed
+            else None
+        )
+        inference_resumed = inference_outputs is not None
         if inference_outputs is None:
             inference_outputs = export_plan_a_inference_bundle(
                 protocol_config_path=final_test_protocol_config,
@@ -1138,6 +1589,7 @@ def run_plan_a_study_bundle(
                 checkpoint_selection_summary_path=train_outputs.get("checkpoint_selection_summary_path"),
                 model_family=str(train_outputs.get("model_family", model_family)),
             )
+            write_stage_provenance(run_root / "analysis", analysis_provenance)
         else:
             _emit_progress(
                 progress_callback,
@@ -1157,7 +1609,34 @@ def run_plan_a_study_bundle(
             progress_callback=progress_callback,
         )
 
-        artifact_outputs = _load_existing_artifact_outputs(run_root, run_id, analysis_config, "report")
+        report_provenance = build_stage_provenance(
+            stage_name="report",
+            input_files=(
+                final_test_protocol_config,
+                run_eval_config,
+                analysis_config,
+                inference_outputs["analysis_summary_path"],
+                inference_outputs["analysis_path"],
+            ),
+            input_values={
+                "run_id": run_id,
+                "checkpoint_policy": primary_checkpoint_policy,
+            },
+        )
+        artifact_outputs = (
+            _load_existing_artifact_outputs(
+                run_root,
+                run_id,
+                expected_provenance=report_provenance,
+                resume_policy=resume_policy,
+                protocol_config_path=final_test_protocol_config,
+                eval_config_path=run_eval_config,
+                analysis_config_path=analysis_config,
+                subdir_name="report",
+            )
+            if inference_resumed
+            else None
+        )
         if artifact_outputs is None:
             artifact_outputs = generate_plan_a_artifact_bundle(
                 analysis_path=inference_outputs["analysis_path"],
@@ -1167,6 +1646,7 @@ def run_plan_a_study_bundle(
                 analysis_config_path=analysis_config,
                 output_dir=run_root / "report",
             )
+            write_stage_provenance(run_root / "report", report_provenance)
         else:
             _emit_progress(
                 progress_callback,
@@ -1186,7 +1666,34 @@ def run_plan_a_study_bundle(
                 )
             analysis_subdir = "analysis_theory" if companion_policy == "theory" else f"analysis_{companion_policy}"
             report_subdir = "report_theory" if companion_policy == "theory" else f"report_{companion_policy}"
-            companion_inference_outputs = _load_existing_inference_outputs(run_root, run_id, analysis_subdir)
+            companion_analysis_provenance = build_stage_provenance(
+                stage_name=analysis_subdir,
+                input_files=(
+                    final_test_protocol_config,
+                    model_config,
+                    final_manifest_outputs["manifest_path"],
+                    companion_checkpoint_path,
+                ),
+                input_values={
+                    "run_id": run_id,
+                    "checkpoint_policy": companion_policy,
+                },
+            )
+            companion_inference_outputs = (
+                _load_existing_inference_outputs(
+                    run_root,
+                    run_id,
+                    expected_provenance=companion_analysis_provenance,
+                    resume_policy=resume_policy,
+                    protocol_config_path=final_test_protocol_config,
+                    model_config_path=model_config,
+                    checkpoint_path=companion_checkpoint_path,
+                    subdir_name=analysis_subdir,
+                )
+                if training_resumed
+                else None
+            )
+            companion_inference_resumed = companion_inference_outputs is not None
             if companion_inference_outputs is None:
                 companion_inference_outputs = export_plan_a_inference_bundle(
                     protocol_config_path=final_test_protocol_config,
@@ -1198,11 +1705,34 @@ def run_plan_a_study_bundle(
                     checkpoint_selection_summary_path=train_outputs.get("checkpoint_selection_summary_path"),
                     model_family=str(train_outputs.get("model_family", model_family)),
                 )
-            companion_artifact_outputs = _load_existing_artifact_outputs(
-                run_root,
-                run_id,
-                analysis_config,
-                report_subdir,
+                write_stage_provenance(run_root / analysis_subdir, companion_analysis_provenance)
+            companion_report_provenance = build_stage_provenance(
+                stage_name=report_subdir,
+                input_files=(
+                    final_test_protocol_config,
+                    run_eval_config,
+                    analysis_config,
+                    companion_inference_outputs["analysis_summary_path"],
+                    companion_inference_outputs["analysis_path"],
+                ),
+                input_values={
+                    "run_id": run_id,
+                    "checkpoint_policy": companion_policy,
+                },
+            )
+            companion_artifact_outputs = (
+                _load_existing_artifact_outputs(
+                    run_root,
+                    run_id,
+                    expected_provenance=companion_report_provenance,
+                    resume_policy=resume_policy,
+                    protocol_config_path=final_test_protocol_config,
+                    eval_config_path=run_eval_config,
+                    analysis_config_path=analysis_config,
+                    subdir_name=report_subdir,
+                )
+                if companion_inference_resumed
+                else None
             )
             if companion_artifact_outputs is None:
                 companion_artifact_outputs = generate_plan_a_artifact_bundle(
@@ -1213,6 +1743,7 @@ def run_plan_a_study_bundle(
                     analysis_config_path=analysis_config,
                     output_dir=run_root / report_subdir,
                 )
+                write_stage_provenance(run_root / report_subdir, companion_report_provenance)
             policy_outputs[companion_policy] = {
                 "analysis": companion_inference_outputs,
                 "report": companion_artifact_outputs,

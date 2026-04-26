@@ -187,6 +187,8 @@ def build_frozen_matched_manifest(
     negative_source_dataset_name: str = "",
     positive_source_role: str = "",
     negative_source_role: str = "",
+    positive_source_partition_name: str = "",
+    negative_source_partition_name: str = "",
     reference_score_name: str = "softmax_entropy",
     num_bins: int = 10,
     test_size: float = 0.3,
@@ -206,10 +208,14 @@ def build_frozen_matched_manifest(
                 continue
             if positive_source_role and record.source_role != positive_source_role:
                 continue
+            if positive_source_partition_name and record.source_partition_name != positive_source_partition_name:
+                continue
         if record.cohort_name == negative_cohort:
             if negative_source_dataset_name and record.source_dataset_name != negative_source_dataset_name:
                 continue
             if negative_source_role and record.source_role != negative_source_role:
+                continue
+            if negative_source_partition_name and record.source_partition_name != negative_source_partition_name:
                 continue
         samples_by_id[record.sample_id] = record
     references_by_id = {
@@ -236,6 +242,8 @@ def build_frozen_matched_manifest(
         "negative_source_dataset_name": negative_source_dataset_name,
         "positive_source_role": positive_source_role,
         "negative_source_role": negative_source_role,
+        "positive_source_partition_name": positive_source_partition_name,
+        "negative_source_partition_name": negative_source_partition_name,
         "reference_score_name": reference_score_name,
         "num_bins": num_bins,
         "test_size": test_size,

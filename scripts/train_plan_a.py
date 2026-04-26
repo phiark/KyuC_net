@@ -2,20 +2,13 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
-import sys
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-RUNTIME_CACHE_ROOT = REPO_ROOT / ".cache" / "runtime"
-RUNTIME_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", str(RUNTIME_CACHE_ROOT / "matplotlib"))
-os.environ.setdefault("XDG_CACHE_HOME", str(REPO_ROOT / ".cache"))
+from _bootstrap import bootstrap_repo
+
+REPO_ROOT = bootstrap_repo(configure_runtime_cache=True)
 
 
 def parse_args() -> argparse.Namespace:

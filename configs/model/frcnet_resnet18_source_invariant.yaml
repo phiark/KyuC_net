@@ -1,0 +1,10 @@
+model:
+  name: frcnet_resnet18_source_invariant
+  backbone: resnet18
+  num_classes: 10
+  resolution_temperature: 1.0
+  content_temperature: 1.0
+  source_adversary_enabled: true
+  num_source_domains: 7
+  grl_lambda: 1.0
+  source_head_hidden_dim: 128

@@ -3,7 +3,7 @@
 - document_id: docs_index
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-25
+- last_updated: 2026-04-26
 - standard_alignment: iso_8601, iso_iec_ieee_15289, iso_iec_11179_inspired
 
 ## 1. 目的
@@ -36,6 +36,8 @@
 - [Plan A Next v0.4 semantic repair plan](architecture/plan_a_next_v0_4_semantic_repair_plan.md)
 - [Plan A Next v0.5 evidence repair protocol](architecture/plan_a_next_v0_5_evidence_repair_protocol.md)
 - [Plan A Next v0.6 multisource LOSO protocol](architecture/plan_a_next_v0_6_multisource_loso_protocol.md)
+- [Plan A Next v0.6B source-invariant protocol](architecture/plan_a_next_v0_6b_source_invariant_protocol.md)
+- [Plan A Next v0.6C near-OOD split repair protocol](architecture/plan_a_next_v0_6c_near_ood_split_repair_protocol.md)
 - [方案 A v0.3 研究协议](architecture/plan_a_v0_3_protocol.md)
 - [方案 A v0.3debug 理论对齐协议](architecture/plan_a_v0_3debug_protocol.md)
 - [方案 A v0.3debug R2 协议](architecture/plan_a_v0_3debug_r2_protocol.md)
@@ -57,12 +59,16 @@
 - [ADR-0006 Plan A Next v0.2 data semantic baseline](../records/decisions/adr_0006_plan_a_next_v0_2_data_semantic_baseline.md)
 - [ADR-0007 Plan A Next v0.5 evidence repair](../records/decisions/adr_0007_plan_a_next_v0_5_evidence_repair.md)
 - [ADR-0008 Plan A Next v0.6 multisource LOSO](../records/decisions/adr_0008_plan_a_next_v0_6_multisource_loso.md)
+- [ADR-0009 Plan A Next v0.6B source-invariant repair](../records/decisions/adr_0009_plan_a_next_v0_6b_source_invariant.md)
+- [ADR-0010 Plan A Next v0.6C near-OOD split repair](../records/decisions/adr_0010_plan_a_next_v0_6c_near_ood_split_repair.md)
 - [2026-04-24 Plan A Next v0.2 issue ledger](../records/reviews/2026-04-24_review_plan_a_next_v0_2_issue_ledger.md)
 - [2026-04-25 Literature and project alignment review](../records/reviews/2026-04-25_review_literature_project_alignment.md)
 - [2026-04-25 V4.0 strict freeze scope control](../records/reviews/2026-04-25_review_v0_4_strict_freeze_scope_control.md)
 - [2026-04-25 V4.0 strict freeze local proof](../records/reviews/2026-04-25_review_v0_4_strict_freeze_local_proof.md)
 - [2026-04-26 V0.5 evidence repair scope](../records/reviews/2026-04-26_review_v0_5_evidence_repair_scope.md)
 - [2026-04-26 V0.6 multisource LOSO scope](../records/reviews/2026-04-26_review_v0_6_multisource_loso_scope.md)
+- [2026-04-26 V0.6B source-invariant scope](../records/reviews/2026-04-26_review_v0_6b_source_invariant_scope.md)
+- [2026-04-26 V0.6C near-OOD split repair scope](../records/reviews/2026-04-26_review_v0_6c_near_ood_split_repair_scope.md)
 
 ### 3.6 Templates
 

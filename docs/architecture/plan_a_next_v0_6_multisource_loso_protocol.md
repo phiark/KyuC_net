@@ -104,4 +104,6 @@ If V0.6-A does not reach the clean partial repair gate, the next package is V0.6
 - add source-balanced calibration loss
 - keep FRCNet backbone and primary heads otherwise stable
 
+V0.6-B is now specified by `docs/architecture/plan_a_next_v0_6b_source_invariant_protocol.md` and `records/decisions/adr_0009_plan_a_next_v0_6b_source_invariant.md`.
+
 Decision-regret, candidate proposition repair, and hard resolver redesign remain V0.7+ work.

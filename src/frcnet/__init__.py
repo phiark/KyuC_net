@@ -43,7 +43,7 @@ from frcnet.evaluation import (
     write_sample_analysis_records,
     write_top1_proposition_records,
 )
-from frcnet.models import FRCNetModel, ModelOutput, SoftmaxReferenceModel
+from frcnet.models import FRCNetModel, ModelOutput, SoftmaxReferenceModel, gradient_reverse
 from frcnet.training import LossBreakdown, compute_total_loss, run_train_step
 from frcnet.utils import (
     RuntimeSpec,
@@ -80,6 +80,7 @@ __all__ = [
     "completion_score",
     "compute_total_loss",
     "content_entropy",
+    "gradient_reverse",
     "load_plan_a_source_datasets",
     "move_batch_to_device",
     "read_manifest_jsonl",
@@ -109,4 +110,4 @@ __all__ = [
     "write_top1_proposition_records",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0c0"

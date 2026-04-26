@@ -127,6 +127,47 @@ def test_frozen_manifest_hash_changes_when_reference_score_changes():
     assert compute_matched_manifest_hash(first_records) != compute_matched_manifest_hash(changed_records)
 
 
+def test_frozen_manifest_filters_negative_source_partition():
+    samples, references = _fixture_records()
+    partitioned_samples = []
+    for record in samples:
+        if record.cohort_name == "ood" and record.sample_id in {"ood-0", "ood-1"}:
+            partitioned_samples.append(
+                replace(
+                    record,
+                    source_dataset_name="cifar100",
+                    source_role="seen_source_ood",
+                    source_partition_name="cifar100_seen",
+                )
+            )
+        elif record.cohort_name == "ood":
+            partitioned_samples.append(
+                replace(
+                    record,
+                    source_dataset_name="cifar100",
+                    source_role="unseen_ood_classes",
+                    source_partition_name="cifar100_heldout",
+                )
+            )
+        else:
+            partitioned_samples.append(record)
+
+    manifest_records, _ = build_frozen_matched_manifest(
+        partitioned_samples,
+        references,
+        negative_source_dataset_name="cifar100",
+        negative_source_role="unseen_ood_classes",
+        negative_source_partition_name="cifar100_heldout",
+        num_bins=2,
+        test_size=0.5,
+        random_state=7,
+    )
+
+    negative_records = [record for record in manifest_records if record.cohort_name == "ood"]
+    assert negative_records
+    assert {record.source_partition_name for record in negative_records} == {"cifar100_heldout"}
+
+
 def test_scalar_scan_uses_same_frozen_manifest_subset_as_pair_benchmark():
     samples, references = _fixture_records()
     extra_records = [

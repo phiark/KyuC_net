@@ -3,12 +3,10 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import sys
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+from _bootstrap import bootstrap_repo
+
+REPO_ROOT = bootstrap_repo()
 
 from frcnet.workflows import generate_plan_a_artifact_bundle
 

@@ -2,23 +2,16 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
-import sys
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-RUNTIME_CACHE_ROOT = REPO_ROOT / ".cache" / "runtime"
-RUNTIME_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", str(RUNTIME_CACHE_ROOT / "matplotlib"))
-os.environ.setdefault("XDG_CACHE_HOME", str(REPO_ROOT / ".cache"))
+from _bootstrap import bootstrap_repo
+
+REPO_ROOT = bootstrap_repo(configure_runtime_cache=True)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Aggregate an existing v0.3debug R2 Plan A study directory.")
-    parser.add_argument("--study-config", default="configs/study/plan_a_v0_3debug_r2_study.yaml")
+    parser = argparse.ArgumentParser(description="Aggregate an existing Plan A study directory.")
+    parser.add_argument("--study-config", default="configs/study/plan_a_next_v0_6c_near_ood_cifar100_class_holdout.yaml")
     parser.add_argument("--study-root", required=True)
     parser.add_argument("--output-dir", default=None)
     return parser.parse_args()

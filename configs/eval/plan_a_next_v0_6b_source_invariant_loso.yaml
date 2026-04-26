@@ -1,0 +1,71 @@
+eval:
+  protocol_id: plan_a_next_v0_6b_source_invariant_loso
+  positive_cohort: ambiguous_id
+  negative_cohort: ood
+  primary_pair: resolution_ratio__state_weighted_content_entropy
+  secondary_pair: resolution_ratio__state_content_entropy
+  weighted_pair: resolution_ratio__state_content_entropy
+  primary_scalar: top1_completion_beta_0_1
+  tau_scalar_name: proposition_truth_ratio
+  completion_scan_scalars:
+    - top1_completion_beta_0_1
+    - top1_completion_beta_0_25
+    - top1_completion_beta_0_5
+    - top1_completion_beta_0_75
+  matched_manifest_path: ""
+  require_matched_manifest: true
+  benchmark_slices:
+    - benchmark_name: ambiguous_vs_seen_ood_svhn
+      positive_cohort: ambiguous_id
+      negative_cohort: ood
+      negative_source_dataset_name: svhn
+      negative_source_role: seen_source_ood
+      matched_manifest_path: ""
+      require_matched_manifest: true
+    - benchmark_name: ambiguous_vs_seen_ood_dtd
+      positive_cohort: ambiguous_id
+      negative_cohort: ood
+      negative_source_dataset_name: dtd
+      negative_source_role: seen_source_ood
+      matched_manifest_path: ""
+      require_matched_manifest: true
+    - benchmark_name: ambiguous_vs_seen_ood_lsun_resize
+      positive_cohort: ambiguous_id
+      negative_cohort: ood
+      negative_source_dataset_name: lsun_resize
+      negative_source_role: seen_source_ood
+      matched_manifest_path: ""
+      require_matched_manifest: true
+    - benchmark_name: ambiguous_vs_seen_ood_gaussian_noise
+      positive_cohort: ambiguous_id
+      negative_cohort: ood
+      negative_source_dataset_name: gaussian_noise
+      negative_source_role: seen_source_ood
+      matched_manifest_path: ""
+      require_matched_manifest: true
+    - benchmark_name: ambiguous_vs_seen_ood_tiny_imagenet
+      positive_cohort: ambiguous_id
+      negative_cohort: ood
+      negative_source_dataset_name: tiny_imagenet
+      negative_source_role: seen_source_ood
+      matched_manifest_path: ""
+      require_matched_manifest: true
+    - benchmark_name: ambiguous_vs_unseen_ood_cifar100
+      positive_cohort: ambiguous_id
+      negative_cohort: ood
+      negative_source_dataset_name: cifar100
+      negative_source_role: unseen_ood_source
+      matched_manifest_path: ""
+      require_matched_manifest: true
+    - benchmark_name: ambiguous_vs_all_ood
+      positive_cohort: ambiguous_id
+      negative_cohort: ood
+      matched_manifest_path: ""
+      require_matched_manifest: true
+  reference:
+    model_family: softmax_ce_reference
+    score_name: softmax_entropy
+    num_bins: 10
+  emit_proposition_diagnostics: true
+  test_size: 0.3
+  random_state: 7

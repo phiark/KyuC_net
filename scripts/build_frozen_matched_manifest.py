@@ -3,15 +3,13 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import sys
 from typing import Any
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+from _bootstrap import bootstrap_repo
+
+REPO_ROOT = bootstrap_repo()
 
 from frcnet.evaluation import (
     build_frozen_matched_manifest,
@@ -58,6 +56,8 @@ def main() -> int:
         negative_source_dataset_name=str(benchmark_config.get("negative_source_dataset_name", "")),
         positive_source_role=str(benchmark_config.get("positive_source_role", "")),
         negative_source_role=str(benchmark_config.get("negative_source_role", "")),
+        positive_source_partition_name=str(benchmark_config.get("positive_source_partition_name", "")),
+        negative_source_partition_name=str(benchmark_config.get("negative_source_partition_name", "")),
         reference_score_name=str(reference_config.get("score_name", "softmax_entropy")),
         num_bins=int(reference_config.get("num_bins", 10)),
         test_size=float(eval_config.get("test_size", 0.3)),

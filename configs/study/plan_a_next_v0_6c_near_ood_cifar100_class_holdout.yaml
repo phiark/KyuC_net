@@ -1,0 +1,32 @@
+study:
+  study_id: plan_a_next_v0_6c_near_ood_cifar100_class_holdout
+  model_family: frcnet_source_invariant
+  output_root: artifacts/studies
+  resume_policy: fail_on_stale
+  seeds: [7, 17, 27]
+  train_protocol_config: configs/protocol/plan_a_next_v0_6c_train.yaml
+  validation_protocol_config: configs/protocol/plan_a_next_v0_6c_validation.yaml
+  analysis_protocol_config: configs/protocol/plan_a_next_v0_6c_test_cifar100_class_holdout.yaml
+  final_test_protocol_config: configs/protocol/plan_a_next_v0_6c_test_cifar100_class_holdout.yaml
+  model_config: configs/model/frcnet_resnet18_source_invariant.yaml
+  train_config: configs/train/plan_a_next_v0_6c_near_ood_weighted_curriculum.yaml
+  eval_config: configs/eval/plan_a_next_v0_6c_near_ood_loso.yaml
+  analysis_config: configs/analysis/plan_a_next_v0_2_artifacts.yaml
+  reference_config: configs/reference/plan_a_next_v0_5_softmax_ce_reference.yaml
+  protocol_controls:
+    source_balanced_sampling: true
+    near_ood_training_sources: [tiny_imagenet, cifar100]
+    require_source_overlap_zero: true
+    require_strict_frozen_final: true
+    protocol_variant: cifar100_class_holdout
+  required_benchmark_slices:
+    - ambiguous_vs_seen_ood_tiny_imagenet
+    - ambiguous_vs_seen_ood_cifar100_seen_classes
+    - ambiguous_vs_unseen_ood_cifar100_heldout_classes
+    - ambiguous_vs_all_ood
+  report_policy:
+    ranking_metric: unseen_ood_cifar100_heldout_classes_pair_auroc
+    primary_checkpoint_policy: near_ood_balanced
+    companion_checkpoint_policies: [balanced, theory]
+    gap_minuend_policy: near_ood_balanced
+    gap_subtrahend_policy: balanced

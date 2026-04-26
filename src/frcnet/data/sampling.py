@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 import math
 import random
-from typing import Iterable, Iterator, Sequence
+from typing import Iterable, Iterator, Mapping, Sequence
 
 from torch.utils.data import Sampler
 
@@ -16,6 +16,45 @@ def _distribute_count(total_count: int, num_buckets: int) -> tuple[int, ...]:
     base_count = total_count // num_buckets
     remainder = total_count % num_buckets
     return tuple(base_count + (1 if bucket_index < remainder else 0) for bucket_index in range(num_buckets))
+
+
+def _distribute_weighted_count(
+    total_count: int,
+    bucket_names: Sequence[str],
+    source_weights: Mapping[str, float] | None,
+) -> tuple[int, ...]:
+    if total_count <= 0:
+        raise ValueError("total_count must be positive.")
+    if not bucket_names:
+        raise ValueError("bucket_names must not be empty.")
+    if source_weights is None:
+        return _distribute_count(total_count, len(bucket_names))
+
+    weights = [max(0.0, float(source_weights.get(bucket_name, 1.0))) for bucket_name in bucket_names]
+    weight_total = sum(weights)
+    if weight_total <= 0.0:
+        raise ValueError("source_weights must contain at least one positive weight.")
+
+    raw_counts = [total_count * weight / weight_total for weight in weights]
+    counts = [int(math.floor(raw_count)) for raw_count in raw_counts]
+    remainder = total_count - sum(counts)
+    fractional_order = sorted(
+        range(len(bucket_names)),
+        key=lambda index: (raw_counts[index] - counts[index], bucket_names[index]),
+        reverse=True,
+    )
+    for index in fractional_order[:remainder]:
+        counts[index] += 1
+
+    if total_count >= len(bucket_names):
+        zero_indices = [index for index, count in enumerate(counts) if count == 0 and weights[index] > 0.0]
+        for zero_index in zero_indices:
+            donor_index = max(range(len(counts)), key=lambda index: counts[index])
+            if counts[donor_index] <= 1:
+                break
+            counts[donor_index] -= 1
+            counts[zero_index] = 1
+    return tuple(counts)
 
 
 class _CyclingIndexPool:
@@ -65,6 +104,7 @@ class SourceBalancedBatchSampler(Sampler[list[int]]):
         id_cohorts: Iterable[str] = ("easy_id", "hard_id"),
         ambiguous_cohorts: Iterable[str] = ("ambiguous_id",),
         ood_cohorts: Iterable[str] = ("unknown_supervision", "ood"),
+        source_weights: Mapping[str, float] | None = None,
     ) -> None:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive.")
@@ -84,6 +124,11 @@ class SourceBalancedBatchSampler(Sampler[list[int]]):
         self.id_cohorts = frozenset(str(value) for value in id_cohorts)
         self.ambiguous_cohorts = frozenset(str(value) for value in ambiguous_cohorts)
         self.ood_cohorts = frozenset(str(value) for value in ood_cohorts)
+        self.source_weights = (
+            None
+            if source_weights is None
+            else {str(source_name): float(weight) for source_name, weight in source_weights.items()}
+        )
         self.records = list(manifest_records)
         if not self.records:
             raise ValueError("manifest_records must not be empty.")
@@ -137,7 +182,7 @@ class SourceBalancedBatchSampler(Sampler[list[int]]):
         self._epoch_index += 1
         id_pool, ambiguous_pool, ood_pools = self._build_pools(rng=rng)
         ood_source_names = tuple(sorted(ood_pools))
-        ood_counts = _distribute_count(self.ood_count, len(ood_source_names))
+        ood_counts = _distribute_weighted_count(self.ood_count, ood_source_names, self.source_weights)
         for _ in range(self.batches_per_epoch):
             batch_indices = []
             batch_indices.extend(id_pool.take(self.id_count))

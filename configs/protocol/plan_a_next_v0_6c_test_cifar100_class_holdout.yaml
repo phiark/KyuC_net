@@ -1,0 +1,147 @@
+protocol:
+  protocol_id: plan_a_next_v0_6c_test_cifar100_class_holdout
+  seed: 107
+  split_name: test
+  output_root: artifacts/reports/generated
+  num_classes: 10
+  datasets:
+    cifar10:
+      root: data/cifar10
+      train: false
+      download: false
+    svhn:
+      root: data/svhn
+      split: test
+      download: false
+    dtd:
+      root: data/dtd
+      split: test
+      download: false
+    lsun_resize:
+      root: data/lsun_resize
+      split: all
+      download: false
+    gaussian_noise:
+      split: test
+      length: 3000
+      seed: 6207
+      image_size: 32
+      mean: 0.5
+      std: 0.25
+    tiny_imagenet:
+      root: data/tiny_imagenet/tiny-imagenet-200
+      split: val
+      download: false
+    cifar100:
+      root: data/cifar100
+      train: false
+      download: false
+  analysis:
+    easy_id_per_class: 200
+    hard_id_per_class: 200
+    ambiguous_per_pair: 200
+    ood_count: 500
+    unknown_supervision_count: 0
+    dataloader:
+      batch_size: 128
+      drop_last: false
+      num_workers: 0
+  source_partitions:
+    cifar10:
+      name: cifar10_test_per_class_200_1000
+      class_index_start: 200
+      class_index_stop: 1000
+    svhn:
+      name: svhn_test_global_1000_3000
+      index_start: 1000
+      index_stop: 3000
+    dtd:
+      name: dtd_test_global_0000_1000
+      index_start: 0
+      index_stop: 1000
+    lsun_resize:
+      name: lsun_resize_global_2300_3300
+      index_start: 2300
+      index_stop: 3300
+    gaussian_noise:
+      name: gaussian_noise_test_global_0000_1000
+      index_start: 0
+      index_stop: 1000
+    tiny_imagenet:
+      name: tiny_imagenet_val_global_1000_2000
+      index_start: 1000
+      index_stop: 2000
+    cifar100:
+      name: cifar100_test_class_holdout
+  source_roles:
+    cifar10: in_domain
+    svhn: seen_source_ood
+    dtd: seen_source_ood
+    lsun_resize: seen_source_ood
+    gaussian_noise: seen_source_ood
+    tiny_imagenet: seen_source_ood
+    cifar100: seen_source_ood
+  source_domains:
+    cifar10: {label: 0, name: cifar10}
+    svhn: {label: 1, name: svhn}
+    dtd: {label: 2, name: dtd}
+    lsun_resize: {label: 3, name: lsun_resize}
+    gaussian_noise: {label: 4, name: gaussian_noise}
+    tiny_imagenet: {label: 5, name: tiny_imagenet}
+    cifar100: {label: 6, name: cifar100}
+  ood_sources:
+    - dataset_name: svhn
+      count: 500
+      source_role: seen_source_ood
+    - dataset_name: dtd
+      count: 500
+      source_role: seen_source_ood
+    - dataset_name: lsun_resize
+      count: 500
+      source_role: seen_source_ood
+    - dataset_name: gaussian_noise
+      count: 500
+      source_role: seen_source_ood
+    - dataset_name: tiny_imagenet
+      count: 500
+      source_role: seen_source_ood
+    - dataset_name: cifar100
+      count: 500
+      source_role: seen_source_ood
+      source_partition_name: cifar100_test_seen_classes_000_050_final
+      class_label_start: 0
+      class_label_stop: 50
+      index_start: 1000
+      index_stop: 2000
+    - dataset_name: cifar100
+      count: 1000
+      source_role: unseen_ood_classes
+      source_partition_name: cifar100_test_unseen_classes_050_100_final
+      class_label_start: 50
+      class_label_stop: 100
+      index_start: 0
+      index_stop: 2000
+  ambiguous:
+    recipes: [mixup, overlay, occlusion]
+    alpha_min: 0.35
+    alpha_max: 0.65
+    class_pairs:
+      - [3, 5]
+      - [4, 7]
+      - [1, 9]
+      - [0, 2]
+      - [1, 8]
+    heldout_class_pairs:
+      - [0, 2]
+      - [1, 8]
+    occlusion_fraction: 0.35
+  hard_id:
+    recipes: [gaussian_blur, low_res]
+    blur_kernel_size: 5
+    blur_sigma: 1.0
+    low_res_size: 16
+  extensions:
+    overlay_enabled: true
+    occlusion_enabled: true
+    noise_enabled: false
+    texture_enabled: false
