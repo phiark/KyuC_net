@@ -419,6 +419,21 @@ def _prepare_run_strict_eval_config(
     return _write_yaml_section(generated_eval_config_path, "eval", eval_payload)
 
 
+def _prepare_training_eval_config(eval_config: str | Path, output_path: str | Path) -> Path:
+    eval_payload = _load_yaml_section(eval_config, "eval")
+    benchmark_slices = [dict(value) for value in eval_payload.get("benchmark_slices", [])]
+    strict_required = bool(eval_payload.get("require_matched_manifest", False)) or any(
+        bool(value.get("require_matched_manifest", False)) for value in benchmark_slices
+    )
+    if not strict_required:
+        return Path(eval_config)
+
+    eval_payload["matched_manifest_path"] = ""
+    eval_payload["require_matched_manifest"] = False
+    eval_payload["benchmark_slices"] = []
+    return _write_yaml_section(output_path, "eval", eval_payload)
+
+
 def _proposition_accuracy(proposition_path: str | Path, cohort_name: str) -> float:
     proposition_records = read_top1_proposition_records(proposition_path)
     cohort_records = [record for record in proposition_records if record.cohort_name == cohort_name]
@@ -855,6 +870,12 @@ def run_plan_a_study_bundle(
     companion_checkpoint_policies = [
         str(policy_name) for policy_name in report_policy.get("companion_checkpoint_policies", [])
     ]
+    training_eval_config = study_config.get("training_eval_config")
+    if training_eval_config is None:
+        training_eval_config = _prepare_training_eval_config(
+            eval_config,
+            study_root / "shared" / "generated_configs" / "eval_validation_selection.yaml",
+        )
 
     prepare_plan_a_datasets(
         list(dict.fromkeys([train_protocol_config, validation_protocol_config, final_test_protocol_config])),
@@ -898,7 +919,7 @@ def run_plan_a_study_bundle(
                 run_id=run_id,
                 validation_protocol_config_path=validation_protocol_config,
                 validation_manifest_path=validation_manifest_outputs["manifest_path"],
-                eval_config_path=eval_config,
+                eval_config_path=training_eval_config,
                 progress_callback=progress_callback,
             )
         else:

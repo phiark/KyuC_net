@@ -13,6 +13,7 @@ from frcnet.data import (
     write_manifest_jsonl,
 )
 from frcnet.evaluation import MatchedManifestRecord, compute_matched_manifest_hash
+from frcnet.workflows.study import _prepare_training_eval_config
 
 
 class _TargetsOnlyDataset:
@@ -120,3 +121,17 @@ def test_matched_manifest_hash_is_sensitive_to_source_role():
     changed_record = replace(record, source_role="unseen_ood_source")
 
     assert compute_matched_manifest_hash([record]) != compute_matched_manifest_hash([changed_record])
+
+
+def test_v0_5_strict_eval_is_relaxed_for_training_validation(tmp_path: Path):
+    output_path = _prepare_training_eval_config(
+        "configs/eval/plan_a_next_v0_5_evidence_repair.yaml",
+        tmp_path / "eval_validation_selection.yaml",
+    )
+
+    payload = yaml.safe_load(output_path.read_text(encoding="utf-8"))["eval"]
+
+    assert payload["require_matched_manifest"] is False
+    assert payload["matched_manifest_path"] == ""
+    assert payload["benchmark_slices"] == []
+    assert payload["primary_pair"] == "resolution_ratio__state_weighted_content_entropy"
