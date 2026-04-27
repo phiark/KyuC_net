@@ -16,3 +16,20 @@ def bootstrap_repo(*, configure_runtime_cache: bool = False) -> Path:
         os.environ.setdefault("MPLCONFIGDIR", str(runtime_cache_root / "matplotlib"))
         os.environ.setdefault("XDG_CACHE_HOME", str(repo_root / ".cache"))
     return repo_root
+
+
+def make_progress_printer():
+    state = {"batch_active": False}
+
+    def _print_progress(message: str) -> None:
+        if message.startswith("[train-batch] "):
+            payload = message.removeprefix("[train-batch] ")
+            print(f"\r{payload}", end="", flush=True)
+            state["batch_active"] = True
+            return
+        if state["batch_active"]:
+            print("", flush=True)
+            state["batch_active"] = False
+        print(message, flush=True)
+
+    return _print_progress

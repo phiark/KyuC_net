@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from _bootstrap import bootstrap_repo
+from _bootstrap import bootstrap_repo, make_progress_printer
 
 REPO_ROOT = bootstrap_repo(configure_runtime_cache=True)
 
@@ -31,30 +31,13 @@ def _default_output_dir(train_config_path: str | Path, run_id: str) -> Path:
     return Path(train_config["output_root"]) / run_id
 
 
-def _make_progress_printer():
-    state = {"batch_active": False}
-
-    def _print_progress(message: str) -> None:
-        if message.startswith("[train-batch] "):
-            payload = message.removeprefix("[train-batch] ")
-            print(f"\r{payload}", end="", flush=True)
-            state["batch_active"] = True
-            return
-        if state["batch_active"]:
-            print("", flush=True)
-            state["batch_active"] = False
-        print(message, flush=True)
-
-    return _print_progress
-
-
 def main() -> int:
     from frcnet.workflows import timestamp_run_id, train_plan_a_model
 
     args = parse_args()
     run_id = args.run_id or timestamp_run_id()
     output_dir = Path(args.output_dir) if args.output_dir else _default_output_dir(args.train_config, run_id)
-    progress_callback = _make_progress_printer()
+    progress_callback = make_progress_printer()
     outputs = train_plan_a_model(
         protocol_config_path=args.protocol_config,
         model_config_path=args.model_config,

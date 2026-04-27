@@ -1,5 +1,6 @@
 """FRCNet public interfaces."""
 
+from frcnet._version import __version__
 from frcnet.data import (
     ALLOWED_COHORT_NAMES,
     BatchInput,
@@ -109,5 +110,3 @@ __all__ = [
     "write_sample_analysis_records",
     "write_top1_proposition_records",
 ]
-
-__version__ = "0.6.0c0"

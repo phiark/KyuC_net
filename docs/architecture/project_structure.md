@@ -3,7 +3,7 @@
 - document_id: arch_project_structure
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-27
 
 ## 1. 设计原则
 
@@ -39,6 +39,7 @@ HardMin/
 │       ├── training/
 │       ├── evaluation/
 │       ├── analysis/
+│       ├── maintenance/
 │       └── utils/
 ├── configs/
 │   ├── model/
@@ -76,6 +77,8 @@ HardMin/
 
 实现层。任何新增模块都应能说明它对应哪个 requirement 或 ADR。
 
+`src/frcnet/maintenance/` 只放封存、artifact hygiene 和可持续性维护工具。该目录不得引入新的训练或评估科学口径。
+
 ### 3.4 `configs/`
 
 配置与代码分离。训练、评估、分析参数都应通过配置文件落盘并被实验记录引用。
@@ -91,6 +94,8 @@ HardMin/
 ### 3.6 `artifacts/`
 
 只保存可重新生成的派生对象。其真值来源是代码、配置和实验记录, 不是 artifact 自身。
+
+封存状态下, 普通提交不得包含 generated artifact tree、checkpoint、大型 CSV 或运行缓存。checkpoint 保留规则见 `docs/governance/project_archive_status.md`。
 
 ## 4. 文件树约束
 

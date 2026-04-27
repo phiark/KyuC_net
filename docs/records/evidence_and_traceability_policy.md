@@ -3,7 +3,7 @@
 - document_id: rec_evidence_traceability_policy
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-19
+- last_updated: 2026-04-27
 
 ## 1. 目标
 
@@ -35,6 +35,10 @@
 
 用于记录代码审查、实验审查、论文图表审查等活动。
 
+### 2.4 Archive Record
+
+用于记录项目封存状态、最终证据等级、artifact hygiene 结果和后续允许/禁止动作。Archive record 不扩大科学主张, 只固定当前可追溯状态。
+
 ## 3. 最小追踪链
 
 任何结论都应该能回溯到:
@@ -65,3 +69,9 @@
 - `integrity_overrides`
 - `source_run_ids`
 - `source_protocol_ids`
+
+## 6. 封存证据规则
+
+封存状态下, 结论必须引用对应 archive record。V0.6C 的当前封存记录是 `records/reviews/2026-04-27_review_v0_6c_archive_closure.md`。
+
+Generated artifacts 可以作为本地审计材料存在, 但普通提交只应包含 compact records、配置、源码、测试和文档。大型 artifact 与 checkpoint 不应进入普通提交。

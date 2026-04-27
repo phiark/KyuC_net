@@ -3,7 +3,7 @@
 - document_id: ver_verification_and_validation_plan
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-26
+- last_updated: 2026-04-27
 
 ## 1. 目标
 
@@ -50,6 +50,8 @@
 - `VER-CON-018`: custom checkpoint names 必须被 checkpoint writer 与 study loader 同时遵循
 - `VER-CON-019`: stale resume provenance hash 默认必须失败
 - `VER-CON-020`: aggregate ranking metric 或 required source slice 缺失/NaN 时必须抛错
+- `VER-CON-021`: package version 必须从单一版本源导出, 并与封存文档声明一致
+- `VER-CON-022`: checkpoint cleanup helper 必须 dry-run 安全, 且永远保留 `checkpoint_best*` 与 `checkpoint_last*`
 
 ### 2.3 Integration Verification
 
@@ -86,6 +88,7 @@
 - `VER-INT-029`: unchanged study 可以 resume, changed config 在 `fail_on_stale` 下失败
 - `VER-INT-030`: V0.6C aggregate 比较 `near_ood_balanced`, `balanced`, and `theory`
 - `VER-INT-031`: `git ls-files -ci --exclude-standard` 对普通提交应为空或仅包含显式白名单
+- `VER-INT-032`: 封存维护提交不得 stage `artifacts/` 路径
 
 ### 2.4 Scientific Validation
 
@@ -99,6 +102,7 @@
 - `VER-SCI-006`: v0.5 final test 的 unseen OOD 结论仅来自 CIFAR-100 final-only slice
 - `VER-SCI-007`: v0.6 final test 以 CIFAR-100 LOSO、worst-source AUROC 与 seen-unseen gap 判断修复等级
 - `VER-SCI-008`: v0.6C final test 以 unseen CIFAR100 held-out classes、seen near-OOD 与 worst-source AUROC 判断修复等级
+- `VER-SCI-009`: V0.6C 封存只能声明 clean partial evidence, 不得声明 strong final paper result
 
 ## 3. 需求到验证映射
 

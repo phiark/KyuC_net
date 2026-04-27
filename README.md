@@ -1,11 +1,19 @@
 # FRCNet
 
-FRCNet is a document-driven research codebase for a resolution-content disentangled explicit-unknown network. The project baseline comes from two upstream documents:
+FRCNet is a document-driven research codebase for a resolution-content disentangled explicit-unknown network.
 
-- the reset manuscript for explicit unknown / resolution-aware diagnostics
-- the FRCNet experiment design note
+Current archive state:
 
-The canonical model factorization is:
+- package version: `0.6.0`
+- project state: **V0.6C clean partial evidence archive**
+- primary archive record: [V0.6C Archive Closure Review](records/reviews/2026-04-27_review_v0_6c_archive_closure.md)
+- governance status: [Project Archive Status](docs/governance/project_archive_status.md)
+
+The project is archived as a clean partial evidence milestone. It is not a strong final paper result. New model training, architecture changes, or scientific claim expansion should start from a new explicit version plan.
+
+## Model Contract
+
+The canonical FRCNet factorization is:
 
 ```text
 p_k = r * c_k
@@ -15,189 +23,121 @@ q_beta = p_top1 + beta * u
 
 Where:
 
-- `r` is the resolution ratio
-- `c` is the class distribution inside the resolved subspace
-- `u` is the unknown mass
-- `q_beta` is a completion-dependent scalar readout
+- `r` is the resolution ratio.
+- `c` is the class distribution inside the resolved subspace.
+- `u` is the unknown mass.
+- `q_beta` is a completion-dependent scalar readout.
 
-This repository is initialized so that documents are the source of truth and code follows the approved contracts.
+Engineering identifiers intentionally use stable names such as `resolution_ratio`, `content_distribution`, `unknown_mass`, and `completion_score` instead of paper-local single-letter variables.
 
-## Runtime Support
+## Archive Result
 
-FRCNet 0.3 targets a single training code path that runs on:
+V0.6C narrowed the evidence target from unseen CIFAR100 source generalization to CIFAR100 class-holdout near-OOD evidence.
 
-- Apple Silicon macOS with `MPS`
-- Linux with `ROCm`
-- Linux with `CUDA`
-- `CPU` fallback
+Final aggregate interpretation:
 
-The runtime resolver prefers `mps -> rocm -> cuda -> cpu` when `backend=auto`.
+- unseen CIFAR100 held-out classes pair AUROC: `0.6512 +/- 0.0112`
+- all-OOD pair AUROC: `0.8019 +/- 0.0076`
+- worst-source pair AUROC: `0.6435 +/- 0.0214`
+- seen-unseen gap: `0.2178 +/- 0.0020`
+- evidence grade: clean partial repair
 
-Installation notes by platform are documented in [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md).
+Integrity checks:
 
-## Development Order
+- train/validation source fingerprint overlap: `0`
+- train/final source fingerprint overlap: `0`
+- validation/final source fingerprint overlap: `0`
+- CIFAR100 seen classes: `[0, 50)`
+- CIFAR100 held-out classes: `[50, 100)`
 
-1. Update or add requirements in `docs/requirements/`.
-2. Record architectural decisions in `records/decisions/`.
-3. Update contracts in `docs/architecture/`.
-4. Implement code in `src/frcnet/`.
-5. Verify against `docs/verification/`.
-6. Archive experiment evidence in `records/experiments/`.
+Known archived limitations:
 
-## Primary Documents
-
-- [Document Index](docs/index.md)
-- [Naming And Identifier Standard](docs/governance/naming_and_identifier_standard.md)
-- [System Requirements Specification](docs/requirements/system_requirements_specification.md)
-- [Architecture Description](docs/architecture/architecture_description.md)
-- [Plan A Paper Linkage](docs/architecture/plan_a_paper_linkage.md)
-- [Plan A Next v0.2 Protocol](docs/architecture/plan_a_next_v0_2_protocol.md)
-- [Plan A v0.3debug Protocol](docs/architecture/plan_a_v0_3debug_protocol.md)
-- [Plan A v0.3debug R2 Protocol](docs/architecture/plan_a_v0_3debug_r2_protocol.md)
-- [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md)
-- [Project Structure](docs/architecture/project_structure.md)
-- [Verification And Validation Plan](docs/verification/verification_and_validation_plan.md)
-- [ADR-0001 Document-Driven Baseline](records/decisions/adr_0001_document_driven_baseline.md)
-- [ADR-0002 Plan A Protocol Baseline](records/decisions/adr_0002_plan_a_protocol_baseline.md)
-- [ADR-0004 v0.3debug Theory Alignment Repair](records/decisions/adr_0004_v0_3debug_theory_alignment_repair.md)
-- [ADR-0005 v0.3debug R2 Benchmark And Geometry Repair](records/decisions/adr_0005_v0_3debug_r2_benchmark_and_geometry_repair.md)
-- [ADR-0006 Plan A Next v0.2 Data Semantic Baseline](records/decisions/adr_0006_plan_a_next_v0_2_data_semantic_baseline.md)
+- The result is below the strong repair target.
+- Pair-vs-scalar margin remains small.
+- Hard resolver quality remains limited.
+- `balanced` checkpoint policy outperformed the configured primary `near_ood_balanced` policy on unseen CIFAR100.
 
 ## Repository Layout
 
 ```text
 .
 ├── docs/                  # normative project documents
-├── records/               # evidential records and decisions
+├── records/               # decisions, reviews, evidence records
 ├── src/frcnet/            # implementation package
-├── configs/               # structured configuration
-├── tests/                 # unit, integration, contract tests
-├── scripts/               # repeatable command-line entrypoints
-├── artifacts/             # generated outputs, figures, logs, checkpoints
+├── configs/               # structured experiment configuration
+├── tests/                 # unit, contract, integration tests
+├── scripts/               # repeatable CLI entrypoints
+├── artifacts/             # generated outputs; ignored by default
 └── notebooks/             # exploratory notebooks only
 ```
 
-## Current Status
+Generated checkpoints, study outputs, logs, and caches are ignored by default. Normal commits should contain source, config, docs, tests, and compact records only.
 
-The repository now contains:
+## Primary Documents
 
-- document-driven governance and architecture baselines
-- a curriculum-capable FRCNet 0.3 / v0.3debug model and workflow core
-- a `v0.3debug_r2` repair line with balanced-primary dual export and resolved-side geometry regularization
-- a `plan_a_next_v0_2` data-semantic baseline with state/top1 canonical fields and frozen matched-manifest contracts
-- cross-platform runtime resolution for MPS / ROCm / CUDA / CPU
-- contract tests and smoke training tests
-- a Plan A protocol chain from manifest to proposition-aware analysis record to paper-facing artifacts
-- a study workflow for frozen-manifest multi-seed evaluation, aggregate reporting, and theory-vs-balanced checkpoint diagnostics
+- [Document Index](docs/index.md)
+- [Project Archive Status](docs/governance/project_archive_status.md)
+- [System Requirements Specification](docs/requirements/system_requirements_specification.md)
+- [Architecture Description](docs/architecture/architecture_description.md)
+- [Plan A Next V0.6C Protocol](docs/architecture/plan_a_next_v0_6c_near_ood_split_repair_protocol.md)
+- [Verification And Validation Plan](docs/verification/verification_and_validation_plan.md)
+- [ADR-0010 V0.6C Near-OOD Split Repair](records/decisions/adr_0010_plan_a_next_v0_6c_near_ood_split_repair.md)
+- [V0.6C Archive Closure Review](records/reviews/2026-04-27_review_v0_6c_archive_closure.md)
 
-## Quick Start
+Older v0.2, v0.3, v0.4, v0.5, v0.6A, and v0.6B records remain available for traceability, but V0.6C is the archived baseline.
 
-Create a virtual environment and install the package:
+## Environment
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e .
-```
+The validated local maintenance interpreter is `.venv313/bin/python`.
 
 Run the test suite:
 
 ```bash
-pytest
+.venv313/bin/python -m pytest -q
 ```
 
-## Plan A Workflow
-
-The repository now provides three workflow levels:
-
-- single-step training / inference / artifact scripts
-- single-run end-to-end experiment bundling
-- the default v0.3debug R2 multi-seed study workflow for paper-facing results
-- the Plan A Next v0.2 multi-seed baseline protocol for clean data semantics and model understanding
-
-Prepare datasets and verify local availability:
+For a fresh environment:
 
 ```bash
-python scripts/prepare_plan_a_data.py
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e .
 ```
 
-Train on the manifest-backed Plan A training protocol:
+Runtime support remains available for Apple Silicon `MPS`, Linux `ROCm`, Linux `CUDA`, and CPU fallback. See [Runtime Environment Matrix](docs/architecture/runtime_environment_matrix.md).
+
+## Maintenance Commands
+
+Dry-run checkpoint cleanup:
 
 ```bash
-python scripts/train_plan_a.py \
-  --protocol-config configs/protocol/plan_a_v1_train.yaml \
-  --model-config configs/model/frcnet_resnet18_base.yaml \
-  --train-config configs/train/plan_a_train_base.yaml
+.venv313/bin/python scripts/cleanup_checkpoints.py
 ```
 
-Run the full training -> analysis -> artifact bundle in one command:
+Execute generated checkpoint cleanup:
 
 ```bash
-python scripts/run_plan_a_experiment.py
+.venv313/bin/python scripts/cleanup_checkpoints.py --execute
 ```
 
-Run the default v0.3debug R2 study workflow with a frozen evaluation manifest and aggregate report:
+The cleanup command only scans generated-output roots by default and retains `checkpoint_best*` and `checkpoint_last*`.
+
+Verify artifact hygiene:
 
 ```bash
-python scripts/run_plan_a_study.py \
-  --study-config configs/study/plan_a_v0_3debug_r2_study.yaml
+git ls-files -ci --exclude-standard
+git diff --cached --name-only | rg '^artifacts/'
 ```
 
-Run the Plan A Next v0.2 study configuration:
+Both commands should produce no output for a normal maintenance commit.
+
+## Historical Workflows
+
+The previous training and study CLIs remain for reproducibility:
 
 ```bash
-python scripts/run_plan_a_study.py \
-  --study-config configs/study/plan_a_next_v0_2_study.yaml
+.venv313/bin/python scripts/run_plan_a_study.py \
+  --study-config configs/study/plan_a_next_v0_6c_near_ood_cifar100_class_holdout.yaml
 ```
 
-Rebuild aggregate outputs from an existing study root:
-
-```bash
-python scripts/aggregate_plan_a_study.py \
-  --study-config configs/study/plan_a_v0_3debug_r2_study.yaml \
-  --study-root artifacts/studies/plan_a_v0_3debug_r2_main
-```
-
-In `v0.3debug_r2`, `tau = proposition_truth_ratio` is exported as a proposition diagnostic only. The primary matched benchmark and aggregate AUROC plots compare `pair / weighted_pair / scalar`, while `theory` remains a companion export beside the `balanced` primary line.
-
-In `plan_a_next_v0_2`, canonical analysis fields are `state_content_entropy`, `state_weighted_content_entropy`, `state_entropy`, and `top1_completion_beta_*`. Label-aware target/candidate proposition fields are diagnostics only and are rejected from the primary matched benchmark whitelist.
-
-Analysis-only export remains available as a separate chain:
-
-```bash
-python scripts/build_plan_a_manifest.py --protocol-config configs/protocol/plan_a_v1.yaml
-python scripts/run_plan_a_inference.py \
-  --protocol-config configs/protocol/plan_a_v1.yaml \
-  --model-config configs/model/frcnet_resnet18_base.yaml \
-  --manifest-path artifacts/reports/generated/plan_a_v1/plan_a_manifest.jsonl \
-  --checkpoint-path artifacts/experiments/RUN-LOCAL/training/checkpoints/checkpoint_best.pt \
-  --output-dir artifacts/reports/generated/RUN-LOCAL
-python scripts/generate_plan_a_artifacts.py \
-  --analysis-path artifacts/reports/generated/RUN-LOCAL/sample_analysis_records.csv \
-  --analysis-summary-path artifacts/reports/generated/RUN-LOCAL/analysis_summary.json \
-  --protocol-config configs/protocol/plan_a_v1.yaml \
-  --analysis-config configs/analysis/plan_a_artifacts.yaml \
-  --eval-config configs/eval/plan_a_matched_ambiguous_vs_ood.yaml \
-  --output-dir artifacts/reports/generated/RUN-LOCAL
-```
-
-Integrity overrides remain available for explicit debug or review workflows only:
-
-```bash
-python scripts/run_plan_a_inference.py \
-  --protocol-config configs/protocol/plan_a_v1.yaml \
-  --model-config configs/model/frcnet_resnet18_base.yaml \
-  --manifest-path artifacts/reports/generated/plan_a_v1/plan_a_manifest.jsonl \
-  --allow-missing-checkpoint \
-  --output-dir artifacts/reports/generated/RUN-DEBUG
-python scripts/generate_plan_a_artifacts.py \
-  --analysis-path artifacts/reports/generated/RUN-DEBUG/sample_analysis_records.csv \
-  --allow-integrity-override \
-  --protocol-config configs/protocol/plan_a_v1.yaml \
-  --analysis-config configs/analysis/plan_a_artifacts.yaml \
-  --eval-config configs/eval/plan_a_matched_ambiguous_vs_ood.yaml \
-  --output-dir artifacts/reports/generated/RUN-DEBUG
-```
-
-These override paths are recorded in `analysis_summary.json` and `experiment_record.md` and are not the default experiment workflow.
+These commands should not be used to create new claims under the archived V0.6C baseline. New experiments require a new version plan and new records.

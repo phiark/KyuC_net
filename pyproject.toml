@@ -1,9 +1,9 @@
 [project]
 name = "frcnet"
-version = "0.6.0c0"
 description = "FRCNet: resolution-content disentangled explicit-unknown network"
 readme = "README.md"
 requires-python = ">=3.11"
+dynamic = ["version"]
 dependencies = [
     "matplotlib>=3.8",
     "PyYAML>=6.0",
@@ -31,3 +31,6 @@ src = ["src", "tests"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "frcnet._version.__version__"}

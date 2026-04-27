@@ -17,3 +17,4 @@ Current records:
 - `2026-04-26_review_v0_6b_source_invariant_scope.md`
 - `2026-04-26_review_v0_6c_near_ood_split_repair_scope.md`
 - `2026-04-26_review_v0_6_evidence_report.md`
+- `2026-04-27_review_v0_6c_archive_closure.md`

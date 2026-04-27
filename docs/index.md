@@ -3,7 +3,7 @@
 - document_id: docs_index
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-26
+- last_updated: 2026-04-27
 - standard_alignment: iso_8601, iso_iec_ieee_15289, iso_iec_11179_inspired
 
 ## 1. 目的
@@ -23,6 +23,7 @@
 
 - [文档控制](governance/document_control.md)
 - [命名与标识标准](governance/naming_and_identifier_standard.md)
+- [项目封存状态](governance/project_archive_status.md)
 
 ### 3.2 Requirements
 
@@ -69,6 +70,7 @@
 - [2026-04-26 V0.6 multisource LOSO scope](../records/reviews/2026-04-26_review_v0_6_multisource_loso_scope.md)
 - [2026-04-26 V0.6B source-invariant scope](../records/reviews/2026-04-26_review_v0_6b_source_invariant_scope.md)
 - [2026-04-26 V0.6C near-OOD split repair scope](../records/reviews/2026-04-26_review_v0_6c_near_ood_split_repair_scope.md)
+- [2026-04-27 V0.6C archive closure](../records/reviews/2026-04-27_review_v0_6c_archive_closure.md)
 
 ### 3.6 Templates
 
@@ -84,7 +86,7 @@
 
 ## 5. 当前基线结论
 
-- 当前项目优先实现一个原生 explicit-unknown 架构, 而不是 softmax/EDL 的事后解释层
-- 代码主命名不直接沿用论文的单字母符号, 而是使用稳定、可追踪的工程名词
-- 文件树按文档生命周期、配置、实现、验证、记录分层
-- 所有实验结论必须能追溯到需求、ADR、配置和运行记录
+- 当前项目封存为 `FRCNet 0.6.0 / V0.6C clean partial evidence archive`
+- V0.6C 是 clean partial repair, 不是 strong paper-facing final result
+- 后续训练、架构变化或科学主张扩展必须先建立新的版本计划
+- 所有保留结论必须能追溯到需求、ADR、配置、运行记录和封存记录

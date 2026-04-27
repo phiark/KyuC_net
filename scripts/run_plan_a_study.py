@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from _bootstrap import bootstrap_repo
+from _bootstrap import bootstrap_repo, make_progress_printer
 
 REPO_ROOT = bootstrap_repo(configure_runtime_cache=True)
 
@@ -27,28 +27,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _make_progress_printer():
-    state = {"batch_active": False}
-
-    def _print_progress(message: str) -> None:
-        if message.startswith("[train-batch] "):
-            payload = message.removeprefix("[train-batch] ")
-            print(f"\r{payload}", end="", flush=True)
-            state["batch_active"] = True
-            return
-        if state["batch_active"]:
-            print("", flush=True)
-            state["batch_active"] = False
-        print(message, flush=True)
-
-    return _print_progress
-
-
 def main() -> int:
     from frcnet.workflows import run_plan_a_study_bundle
 
     args = parse_args()
-    progress_callback = _make_progress_printer()
+    progress_callback = make_progress_printer()
     outputs = run_plan_a_study_bundle(
         study_config_path=args.study_config,
         output_dir=args.output_dir,

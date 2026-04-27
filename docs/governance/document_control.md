@@ -3,7 +3,7 @@
 - document_id: gov_document_control
 - status: baselined
 - owner: frcnet_project
-- last_updated: 2026-04-18
+- last_updated: 2026-04-27
 - standard_alignment: iso_8601, iso_iec_ieee_15289
 
 ## 1. 采用标准与假设
@@ -79,3 +79,8 @@
 
 在 reviewer 和 approver 尚未固定前, `baselined` 表示“当前工程基线”, 不表示正式组织级放行。
 
+## 7. 封存控制
+
+当前项目封存状态由 `docs/governance/project_archive_status.md` 定义。
+
+封存后允许维护文档、运行说明、非行为性代码整理和 artifact hygiene。任何新增训练、架构变化或科学主张扩展必须先产生新的版本计划和对应记录。
